@@ -16,15 +16,21 @@
  */
 
 import request from 'supertest';
+import { Application } from 'express';
 import { createApp } from '../app';
 import { prisma } from './setup';
 import { createTestUser } from './helpers/auth.helper';
 import { createCompleteTestPatient, createCompleteTestPractitioner } from './helpers/factories';
 import { Role } from '@prisma/client';
 
-const app = createApp();
+let app: Application;
 
 describe('Audit Logging - HIPAA Compliance', () => {
+  beforeAll(() => {
+    // Create app AFTER setup.ts runs to ensure correct Prisma instance
+    app = createApp();
+  });
+
   describe('Audit Log Structure', () => {
     it('should have required audit log fields', async () => {
       const admin = await createTestUser(Role.ADMIN);

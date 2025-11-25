@@ -6,14 +6,19 @@
  */
 
 import request from 'supertest';
+import { Application } from 'express';
 import { createApp } from '../app';
 import { prisma } from './setup';
 import { createTestUser, generateExpiredToken, generateInvalidToken } from './helpers/auth.helper';
 import { Role } from '@prisma/client';
 
-const app = createApp();
+let app: Application;
 
 describe('Authentication Endpoints', () => {
+  beforeAll(() => {
+    // Create app AFTER setup.ts runs to ensure correct Prisma instance
+    app = createApp();
+  });
   describe('POST /api/auth/register', () => {
     it('should register a new patient user successfully', async () => {
       const userData = {

@@ -12,15 +12,20 @@
  */
 
 import request from 'supertest';
+import { Application } from 'express';
 import { createApp } from '../app';
 import { prisma } from './setup';
 import { createTestUser } from './helpers/auth.helper';
 import { createCompleteTestPatient, createCompleteTestPractitioner } from './helpers/factories';
 import { Role } from '@prisma/client';
 
-const app = createApp();
+let app: Application;
 
 describe('Authorization & RBAC', () => {
+  beforeAll(() => {
+    // Create app AFTER setup.ts runs to ensure correct Prisma instance
+    app = createApp();
+  });
   describe('Role Hierarchy', () => {
     it('should have correct role hierarchy: ADMIN > PRACTITIONER > PATIENT', async () => {
       // This is a conceptual test documenting the role hierarchy

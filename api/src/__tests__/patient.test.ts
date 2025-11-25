@@ -6,15 +6,20 @@
  */
 
 import request from 'supertest';
+import { Application } from 'express';
 import { createApp } from '../app';
 import { prisma } from './setup';
 import { createTestUser } from './helpers/auth.helper';
 import { createCompleteTestPatient } from './helpers/factories';
 import { Role } from '@prisma/client';
 
-const app = createApp();
+let app: Application;
 
 describe('Patient Endpoints', () => {
+  beforeAll(() => {
+    // Create app AFTER setup.ts runs to ensure correct Prisma instance
+    app = createApp();
+  });
   describe('POST /api/patients - Create Patient', () => {
     it('should create a new patient as ADMIN', async () => {
       const admin = await createTestUser(Role.ADMIN);
