@@ -17,7 +17,6 @@
 
 import request from 'supertest';
 import { Application } from 'express';
-import { createApp } from '../app';
 import { prisma } from './setup';
 import { createTestUser } from './helpers/auth.helper';
 import { createCompleteTestPatient, createCompleteTestPractitioner } from './helpers/factories';
@@ -26,8 +25,9 @@ import { Role } from '@prisma/client';
 let app: Application;
 
 describe('Audit Logging - HIPAA Compliance', () => {
-  beforeAll(() => {
-    // Create app AFTER setup.ts runs to ensure correct Prisma instance
+  beforeAll(async () => {
+    // Dynamic import to delay loading until AFTER setup.ts configures test environment
+    const { createApp } = await import('../app');
     app = createApp();
   });
 
