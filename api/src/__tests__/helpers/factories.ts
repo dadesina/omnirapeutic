@@ -1,5 +1,5 @@
 import { PrismaClient, Role } from '@prisma/client';
-import { faker } from '../__mocks__/faker';
+import { faker } from '../__mocks__/faker.js';
 
 const prisma = new PrismaClient();
 
