@@ -156,7 +156,7 @@ describe('Authentication Endpoints', () => {
       const auditLogs = await prisma.auditLog.findMany({
         where: {
           userId: testUser.id,
-          action: 'READ',
+          action: 'LOGIN',
           resource: 'auth'
         }
       });
