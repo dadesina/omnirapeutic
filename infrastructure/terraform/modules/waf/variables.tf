@@ -19,9 +19,15 @@ variable "kms_key_arn" {
 }
 
 variable "rate_limit" {
-  description = "Rate limit for requests per IP (per 5 minutes)"
+  description = "General rate limit for requests per IP (per 5 minutes)"
   type        = number
   default     = 2000
+}
+
+variable "auth_rate_limit" {
+  description = "Stricter rate limit for authentication endpoints per IP (per 5 minutes) - protects against brute-force attacks"
+  type        = number
+  default     = 100  # Recommended: 100 requests per 5 minutes for auth endpoints
 }
 
 variable "enable_logging" {

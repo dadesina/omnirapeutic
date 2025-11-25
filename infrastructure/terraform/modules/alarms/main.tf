@@ -211,6 +211,93 @@ resource "aws_cloudwatch_metric_alarm" "aurora_acu_utilization" {
 }
 
 # ========================================
+# Aurora Backup and Disaster Recovery Alarms
+# ========================================
+
+# Backup Snapshot Age - Critical if snapshot is older than 25 hours
+resource "aws_cloudwatch_metric_alarm" "aurora_backup_snapshot_age" {
+  count = var.aurora_cluster_id != "" ? 1 : 0
+
+  alarm_name          = "${var.project_name}-${var.environment}-aurora-backup-snapshot-age"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  threshold           = 90000  # 25 hours in seconds
+  alarm_description   = "Aurora automated backup snapshot is older than 25 hours - B/DR compliance risk"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  treat_missing_data  = "breaching"
+
+  # Note: This metric requires custom CloudWatch metric from Lambda or script
+  # Publishing snapshot age metric to CloudWatch
+  metric_query {
+    id          = "snapshot_age"
+    return_data = true
+
+    metric {
+      metric_name = "BackupSnapshotAge"
+      namespace   = "Custom/RDS"
+      period      = 3600  # Check hourly
+      stat        = "Maximum"
+
+      dimensions = {
+        DBClusterIdentifier = var.aurora_cluster_id
+      }
+    }
+  }
+
+  tags = {
+    Name = "${var.project_name}-${var.environment}-aurora-backup-age-alarm"
+  }
+}
+
+# Aurora Backup Storage - Warning if backup storage usage is high
+resource "aws_cloudwatch_metric_alarm" "aurora_backup_storage_high" {
+  count = var.aurora_cluster_id != "" ? 1 : 0
+
+  alarm_name          = "${var.project_name}-${var.environment}-aurora-backup-storage-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "BackupRetentionPeriodStorageUsed"
+  namespace           = "AWS/RDS"
+  period              = 3600  # Check hourly
+  statistic           = "Average"
+  threshold           = 500000000000  # 500 GB
+  alarm_description   = "Aurora backup storage usage is high - may impact costs"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+
+  dimensions = {
+    DBClusterIdentifier = var.aurora_cluster_id
+  }
+
+  tags = {
+    Name = "${var.project_name}-${var.environment}-aurora-backup-storage-alarm"
+  }
+}
+
+# Aurora Volume Bytes Used - Monitor database growth for capacity planning
+resource "aws_cloudwatch_metric_alarm" "aurora_volume_bytes_used" {
+  count = var.aurora_cluster_id != "" ? 1 : 0
+
+  alarm_name          = "${var.project_name}-${var.environment}-aurora-volume-bytes-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "VolumeBytesUsed"
+  namespace           = "AWS/RDS"
+  period              = 3600  # Check hourly
+  statistic           = "Average"
+  threshold           = 100000000000  # 100 GB
+  alarm_description   = "Aurora volume usage is high - capacity planning needed"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+
+  dimensions = {
+    DBClusterIdentifier = var.aurora_cluster_id
+  }
+
+  tags = {
+    Name = "${var.project_name}-${var.environment}-aurora-volume-bytes-alarm"
+  }
+}
+
+# ========================================
 # NAT Gateway Alarms
 # ========================================
 
@@ -501,5 +588,106 @@ resource "aws_cloudwatch_metric_alarm" "waf_blocked_requests" {
 
   tags = {
     Name = "${var.project_name}-${var.environment}-waf-blocked"
+  }
+}
+
+# ============================================================================
+# Break-the-Glass (BTG) Emergency Access Alarms
+# HIPAA § 164.308(a)(4)(ii)(C) - Emergency Access Procedure
+# ============================================================================
+
+# BTG Log Metric Filter - Detects BTG_GRANT_ACCESS events in application logs
+resource "aws_cloudwatch_log_metric_filter" "btg_grant_access" {
+  count          = var.api_log_group_name != "" ? 1 : 0
+  name           = "${var.project_name}-${var.environment}-btg-grant-access-filter"
+  log_group_name = var.api_log_group_name
+
+  # Pattern matches: Successful BTG grant creation
+  # Looks for the BTG_GRANT_ACCESS action in audit logs
+  pattern = "{ $.action = \"BTG_GRANT_ACCESS\" }"
+
+  metric_transformation {
+    name      = "BTGGrantAccessCount"
+    namespace = "Custom/Security"
+    value     = "1"
+    unit      = "Count"
+
+    dimensions = {
+      Environment = var.environment
+    }
+  }
+}
+
+# BTG Grant Alarm - CRITICAL: Alert on EVERY BTG grant
+# Triggers immediately when emergency access is granted
+resource "aws_cloudwatch_metric_alarm" "btg_grant_access_alert" {
+  count               = var.api_log_group_name != "" ? 1 : 0
+  alarm_name          = "${var.project_name}-${var.environment}-btg-grant-access-CRITICAL"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  metric_name         = "BTGGrantAccessCount"
+  namespace           = "Custom/Security"
+  period              = 60  # Check every minute
+  statistic           = "Sum"
+  threshold           = 1  # Alert on ANY BTG grant
+  alarm_description   = "CRITICAL: Break-the-Glass emergency access granted. Immediate review required for HIPAA compliance."
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    Environment = var.environment
+  }
+
+  tags = {
+    Name     = "${var.project_name}-${var.environment}-btg-grant-alert"
+    Severity = "CRITICAL"
+    Compliance = "HIPAA"
+  }
+}
+
+# BTG Usage Log Metric Filter - Detects when BTG grants are actually used
+resource "aws_cloudwatch_log_metric_filter" "btg_use_access" {
+  count          = var.api_log_group_name != "" ? 1 : 0
+  name           = "${var.project_name}-${var.environment}-btg-use-access-filter"
+  log_group_name = var.api_log_group_name
+
+  # Pattern matches: When a user accesses patient data via BTG grant
+  pattern = "{ $.action = \"BTG_USE_ACCESS\" }"
+
+  metric_transformation {
+    name      = "BTGUseAccessCount"
+    namespace = "Custom/Security"
+    value     = "1"
+    unit      = "Count"
+
+    dimensions = {
+      Environment = var.environment
+    }
+  }
+}
+
+# BTG Usage Alarm - HIGH: Alert when BTG grants are actively used
+resource "aws_cloudwatch_metric_alarm" "btg_use_access_alert" {
+  count               = var.api_log_group_name != "" ? 1 : 0
+  alarm_name          = "${var.project_name}-${var.environment}-btg-use-access-HIGH"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  metric_name         = "BTGUseAccessCount"
+  namespace           = "Custom/Security"
+  period              = 60  # Check every minute
+  statistic           = "Sum"
+  threshold           = 1  # Alert on ANY usage
+  alarm_description   = "HIGH: Break-the-Glass emergency access is being used to access patient records."
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    Environment = var.environment
+  }
+
+  tags = {
+    Name       = "${var.project_name}-${var.environment}-btg-usage-alert"
+    Severity   = "HIGH"
+    Compliance = "HIPAA"
   }
 }

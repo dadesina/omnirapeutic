@@ -8,6 +8,7 @@
 import { Role, Patient } from '@prisma/client';
 import prisma from '../config/database';
 import { JwtPayload } from './auth.service';
+import { hasActiveBtgAccess } from './btg.service';
 
 export interface CreatePatientData {
   userId: string;
@@ -120,6 +121,7 @@ export const getAllPatients = async (
  * - Admin: can view any patient
  * - Practitioner: can view any patient
  * - Patient: can only view own record
+ * - BTG Grant: ADMIN with active Break-the-Glass grant can view patient
  */
 export const getPatientById = async (
   patientId: string,
@@ -138,7 +140,10 @@ export const getPatientById = async (
   const isPractitioner = requestingUser.role === Role.PRACTITIONER;
   const isOwner = patient.userId === requestingUser.userId;
 
-  if (!isAdmin && !isPractitioner && !isOwner) {
+  // BTG: Check for active Break-the-Glass emergency access grant
+  const hasEmergencyAccess = await hasActiveBtgAccess(requestingUser.userId, patientId);
+
+  if (!isAdmin && !isPractitioner && !isOwner && !hasEmergencyAccess) {
     throw new Error('Forbidden: You can only view your own patient record');
   }
 

@@ -58,6 +58,7 @@ beforeAll(async () => {
 afterEach(async () => {
   // Clean up all data between tests in correct order (respecting foreign keys)
   await prisma.auditLog.deleteMany({});
+  await prisma.btgAccessGrant.deleteMany({});
   await prisma.patient.deleteMany({});
   await prisma.practitioner.deleteMany({});
   await prisma.user.deleteMany({});

@@ -66,6 +66,43 @@ jobs:
           # Prisma generate doesn't connect, just reads schema
           DATABASE_URL: postgresql://dummy:dummy@localhost:5432/dummy
 
+      - name: Audit dependencies for vulnerabilities
+        run: |
+          echo "🔍 Scanning dependencies for vulnerabilities..."
+          echo "Checking for high and critical severity vulnerabilities..."
+
+          # Run npm audit and capture output
+          npm audit --audit-level=high --json > audit-report.json || AUDIT_EXIT_CODE=$?
+
+          # Display human-readable summary
+          npm audit --audit-level=high || true
+
+          # Check if critical or high vulnerabilities were found
+          if [ "${AUDIT_EXIT_CODE:-0}" -ne 0 ]; then
+            echo ""
+            echo "❌ SECURITY ALERT: High or Critical vulnerabilities detected!"
+            echo "📋 Vulnerability Summary:"
+            cat audit-report.json | grep -E '"severity":|"title":|"url":' | head -20 || true
+
+            echo ""
+            echo "🔧 To fix vulnerabilities, run:"
+            echo "   npm audit fix"
+            echo "   npm audit fix --force  (for breaking changes)"
+            echo ""
+            echo "⚠️  Build failed due to security vulnerabilities"
+            exit 1
+          fi
+
+          echo "✅ No high or critical vulnerabilities found"
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit-report
+          path: api/audit-report.json
+          retention-days: 30
+
       - name: Run Prisma migrations
         run: npx prisma db push --skip-generate
         env:

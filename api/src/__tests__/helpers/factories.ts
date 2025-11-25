@@ -100,3 +100,21 @@ export async function createCompleteTestPractitioner(password: string = 'Test123
 
   return { user, practitioner, password };
 }
+
+/**
+ * Create a complete test admin with user account
+ */
+export async function createCompleteTestAdmin(password: string = 'Test123!@#') {
+  const bcrypt = require('bcrypt');
+  const hashedPassword = await bcrypt.hash(password, 10);
+
+  const user = await prisma.user.create({
+    data: {
+      email: faker.internet.email().toLowerCase(),
+      password: hashedPassword,
+      role: Role.ADMIN,
+    },
+  });
+
+  return { user, password };
+}

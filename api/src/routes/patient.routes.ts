@@ -16,6 +16,8 @@ import {
 } from '../services/patient.service';
 import { authenticateToken, requireRole } from '../middleware/auth.middleware';
 import prisma from '../config/database';
+import { hasActiveBtgAccess } from '../services/btg.service';
+import { logAuditEvent } from '../services/audit.service';
 
 const router = Router();
 
@@ -57,15 +59,13 @@ router.post(
       );
 
       // Audit log
-      await prisma.auditLog.create({
-        data: {
-          userId: req.user!.userId,
-          action: 'CREATE',
-          resource: 'patients',
-          resourceId: patient.id,
-          details: { patientId: patient.id, medicalRecordNumber: patient.medicalRecordNumber },
-          ipAddress: req.ip || '127.0.0.1'
-        }
+      await logAuditEvent({
+        userId: req.user!.userId,
+        action: 'CREATE',
+        resource: 'patients',
+        resourceId: patient.id,
+        details: { patientId: patient.id, medicalRecordNumber: patient.medicalRecordNumber },
+        ipAddress: req.ip || '127.0.0.1',
       });
 
       res.status(201).json({ patient });
@@ -115,14 +115,13 @@ router.get(
       const result = await getAllPatients(req.user!, { page, limit, search });
 
       // Audit log - PHI access
-      await prisma.auditLog.create({
-        data: {
-          userId: req.user!.userId,
-          action: 'READ',
-          resource: 'patients',
-          details: { action: 'list', page, limit, count: result.patients.length },
-          ipAddress: req.ip || '127.0.0.1'
-        }
+      await logAuditEvent({
+        userId: req.user!.userId,
+        action: 'READ',
+        resource: 'patients',
+        resourceId: null,
+        details: { action: 'list', page, limit, count: result.patients.length },
+        ipAddress: req.ip || '127.0.0.1',
       });
 
       res.status(200).json(result);
@@ -145,7 +144,7 @@ router.get(
 
 /**
  * GET /api/patients/:id
- * Get patient by ID (Admin, Practitioner, or Owner)
+ * Get patient by ID (Admin, Practitioner, Owner, or BTG Grant)
  */
 router.get('/:id', async (req: Request, res: Response) => {
   try {
@@ -153,16 +152,21 @@ router.get('/:id', async (req: Request, res: Response) => {
 
     const patient = await getPatientById(id, req.user!);
 
+    // Check if access was granted via BTG
+    const usedBtgAccess = await hasActiveBtgAccess(req.user!.userId, id);
+
     // Audit log - PHI access
-    await prisma.auditLog.create({
-      data: {
-        userId: req.user!.userId,
-        action: 'READ',
-        resource: 'patients',
-        resourceId: id,
-        details: { patientId: id, medicalRecordNumber: patient.medicalRecordNumber },
-        ipAddress: req.ip || '127.0.0.1'
-      }
+    await logAuditEvent({
+      userId: req.user!.userId,
+      action: usedBtgAccess ? 'BTG_USE_ACCESS' : 'READ',
+      resource: 'patients',
+      resourceId: id,
+      details: {
+        patientId: id,
+        medicalRecordNumber: patient.medicalRecordNumber,
+        accessMethod: usedBtgAccess ? 'break_the_glass' : 'standard_rbac',
+      },
+      ipAddress: req.ip || '127.0.0.1',
     });
 
     res.status(200).json({ patient });
@@ -206,18 +210,16 @@ router.put(
       );
 
       // Audit log - PHI modification
-      await prisma.auditLog.create({
-        data: {
-          userId: req.user!.userId,
-          action: 'UPDATE',
-          resource: 'patients',
-          resourceId: id,
-          details: {
-            patientId: id,
-            changes: { firstName, lastName, dateOfBirth, phoneNumber, address }
-          },
-          ipAddress: req.ip || '127.0.0.1'
-        }
+      await logAuditEvent({
+        userId: req.user!.userId,
+        action: 'UPDATE',
+        resource: 'patients',
+        resourceId: id,
+        details: {
+          patientId: id,
+          changes: { firstName, lastName, dateOfBirth, phoneNumber, address },
+        },
+        ipAddress: req.ip || '127.0.0.1',
       });
 
       res.status(200).json({ patient });
@@ -262,15 +264,13 @@ router.delete(
       await deletePatient(id, req.user!);
 
       // Audit log - PHI deletion
-      await prisma.auditLog.create({
-        data: {
-          userId: req.user!.userId,
-          action: 'DELETE',
-          resource: 'patients',
-          resourceId: id,
-          details: { patientId: id },
-          ipAddress: req.ip || '127.0.0.1'
-        }
+      await logAuditEvent({
+        userId: req.user!.userId,
+        action: 'DELETE',
+        resource: 'patients',
+        resourceId: id,
+        details: { patientId: id },
+        ipAddress: req.ip || '127.0.0.1',
       });
 
       res.status(204).send();

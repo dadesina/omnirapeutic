@@ -16,13 +16,20 @@ resource "aws_cloudwatch_log_group" "waf" {
   }
 }
 
-# WAF WebACL
+# Custom Response Body for Rate Limiting
 resource "aws_wafv2_web_acl" "main" {
   name  = "${var.project_name}-${var.environment}-waf"
   scope = "REGIONAL"  # For ALB (use CLOUDFRONT for CloudFront distributions)
 
   default_action {
     allow {}  # Allow by default, block with rules
+  }
+
+  # Custom response for rate limit exceeded
+  custom_response_body {
+    key          = "rate_limit_exceeded"
+    content      = "{\"error\":\"Too Many Requests\",\"message\":\"Rate limit exceeded. Please try again later.\"}"
+    content_type = "APPLICATION_JSON"
   }
 
   # Rule 1: AWS Managed Rules - Core Rule Set (OWASP Top 10)
@@ -113,6 +120,89 @@ resource "aws_wafv2_web_acl" "main" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "${var.project_name}-${var.environment}-rate-limit"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  # Rule 5: Stricter Rate Limiting for Authentication Endpoints
+  # Protects against brute-force attacks, credential stuffing, and account enumeration
+  # HIPAA § 164.312(a)(1) - Access Control
+  rule {
+    name     = "AuthEndpointRateLimitRule"
+    priority = 5
+
+    action {
+      block {
+        custom_response {
+          response_code = 429  # Too Many Requests
+          custom_response_body_key = "rate_limit_exceeded"
+        }
+      }
+    }
+
+    statement {
+      rate_based_statement {
+        limit              = var.auth_rate_limit
+        aggregate_key_type = "IP"
+
+        # Apply only to authentication endpoints
+        scope_down_statement {
+          or_statement {
+            statement {
+              byte_match_statement {
+                search_string         = "/api/auth/login"
+                positional_constraint = "STARTS_WITH"
+
+                field_to_match {
+                  uri_path {}
+                }
+
+                text_transformation {
+                  priority = 0
+                  type     = "LOWERCASE"
+                }
+              }
+            }
+
+            statement {
+              byte_match_statement {
+                search_string         = "/api/auth/register"
+                positional_constraint = "STARTS_WITH"
+
+                field_to_match {
+                  uri_path {}
+                }
+
+                text_transformation {
+                  priority = 0
+                  type     = "LOWERCASE"
+                }
+              }
+            }
+
+            statement {
+              byte_match_statement {
+                search_string         = "/api/auth/reset-password"
+                positional_constraint = "STARTS_WITH"
+
+                field_to_match {
+                  uri_path {}
+                }
+
+                text_transformation {
+                  priority = 0
+                  type     = "LOWERCASE"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${var.project_name}-${var.environment}-auth-rate-limit"
       sampled_requests_enabled   = true
     }
   }

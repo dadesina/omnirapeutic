@@ -72,3 +72,9 @@ variable "waf_web_acl_name" {
   type        = string
   default     = ""
 }
+
+variable "api_log_group_name" {
+  description = "API CloudWatch Log Group name for BTG monitoring"
+  type        = string
+  default     = ""
+}
