@@ -29,10 +29,8 @@ module.exports = {
   setupFilesAfterEnv: ['<rootDir>/src/__tests__/setup.ts'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
+    '^@faker-js/faker$': '<rootDir>/src/__tests__/__mocks__/faker.ts',
   },
-  transformIgnorePatterns: [
-    'node_modules/(?!@faker-js)',
-  ],
   globals: {
     'ts-jest': {
       tsconfig: {
