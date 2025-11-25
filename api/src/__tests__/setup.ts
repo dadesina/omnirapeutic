@@ -3,27 +3,34 @@ import { PrismaClient } from '@prisma/client';
 
 // Create Prisma Client that will be shared across all test code AND application code
 // By setting it on globalThis, the config/database singleton will reuse this instance
-const testPrisma = new PrismaClient();
+const baseTestPrisma = new PrismaClient();
 
 // HIPAA Compliance: Audit logs must be immutable
-// Middleware to prevent updates and deletions of audit logs
-testPrisma.$use(async (params, next) => {
-  if (params.model === 'AuditLog') {
-    if (params.action === 'update' || params.action === 'updateMany') {
-      throw new Error('Audit logs cannot be modified (HIPAA compliance requirement)');
-    }
-    // Block single delete always, but allow deleteMany in test environment for cleanup
-    if (params.action === 'delete') {
-      throw new Error('Audit logs cannot be deleted (HIPAA compliance requirement)');
-    }
-    if (params.action === 'deleteMany' && process.env.NODE_ENV !== 'test') {
-      throw new Error('Audit logs cannot be deleted (HIPAA compliance requirement)');
-    }
-  }
-  return next(params);
+// Use Prisma client extensions (Prisma 5+) to prevent updates and deletions
+const testPrisma = baseTestPrisma.$extends({
+  name: 'auditLogImmutability',
+  query: {
+    auditLog: {
+      async update({ args, query }) {
+        throw new Error('Audit logs cannot be modified (HIPAA compliance requirement)');
+      },
+      async updateMany({ args, query }) {
+        throw new Error('Audit logs cannot be modified (HIPAA compliance requirement)');
+      },
+      async delete({ args, query }) {
+        throw new Error('Audit logs cannot be deleted (HIPAA compliance requirement)');
+      },
+      async deleteMany({ args, query }) {
+        if (process.env.NODE_ENV !== 'test') {
+          throw new Error('Audit logs cannot be deleted (HIPAA compliance requirement)');
+        }
+        return query(args);
+      },
+    },
+  },
 });
 
-globalThis.prisma = testPrisma;
+globalThis.prisma = testPrisma as any;
 
 export const prisma = testPrisma;
 

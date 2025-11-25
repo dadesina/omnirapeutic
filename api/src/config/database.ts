@@ -17,28 +17,35 @@ declare global {
 
 // Initialize Prisma Client with logging configuration
 const prismaClientSingleton = () => {
-  const client = new PrismaClient({
+  const baseClient = new PrismaClient({
     log: process.env.NODE_ENV === 'development'
       ? ['query', 'info', 'warn', 'error']
       : ['error'],
   });
 
   // HIPAA Compliance: Audit logs must be immutable
-  // Middleware to prevent updates and deletions of audit logs
-  client.$use(async (params, next) => {
-    if (params.model === 'AuditLog') {
-      if (params.action === 'update' || params.action === 'updateMany') {
-        throw new Error('Audit logs cannot be modified (HIPAA compliance requirement)');
-      }
-      // Block single delete always, but allow deleteMany in test environment for cleanup
-      if (params.action === 'delete') {
-        throw new Error('Audit logs cannot be deleted (HIPAA compliance requirement)');
-      }
-      if (params.action === 'deleteMany' && process.env.NODE_ENV !== 'test') {
-        throw new Error('Audit logs cannot be deleted (HIPAA compliance requirement)');
-      }
-    }
-    return next(params);
+  // Use Prisma client extensions (Prisma 5+) to prevent updates and deletions
+  const client = baseClient.$extends({
+    name: 'auditLogImmutability',
+    query: {
+      auditLog: {
+        async update({ args, query }) {
+          throw new Error('Audit logs cannot be modified (HIPAA compliance requirement)');
+        },
+        async updateMany({ args, query }) {
+          throw new Error('Audit logs cannot be modified (HIPAA compliance requirement)');
+        },
+        async delete({ args, query }) {
+          throw new Error('Audit logs cannot be deleted (HIPAA compliance requirement)');
+        },
+        async deleteMany({ args, query }) {
+          if (process.env.NODE_ENV !== 'test') {
+            throw new Error('Audit logs cannot be deleted (HIPAA compliance requirement)');
+          }
+          return query(args);
+        },
+      },
+    },
   });
 
   return client;
@@ -55,7 +62,7 @@ if (process.env.NODE_ENV === 'test') {
 } else {
   // Production/development: create singleton if needed
   if (!globalThis.prisma) {
-    globalThis.prisma = prismaClientSingleton();
+    globalThis.prisma = prismaClientSingleton() as any;
   }
 }
 
