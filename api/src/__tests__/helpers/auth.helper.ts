@@ -10,6 +10,11 @@ export interface TestUser {
   password: string;
   role: Role;
   token: string;
+  user: {
+    userId: string;
+    email: string;
+    role: Role;
+  };
 }
 
 /**
@@ -42,6 +47,11 @@ export async function createTestUser(role: Role = Role.PATIENT): Promise<TestUse
     password, // Return unhashed password for login tests
     role: user.role,
     token,
+    user: {
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+    },
   };
 }
 

@@ -67,14 +67,15 @@ describe('Practitioner Service', () => {
         admin.user
       );
 
-      const result = await getAllPractitioners({ search: 'John' });
+      const result = await getAllPractitioners(admin.user, { search: 'John' });
 
       expect(result.practitioners.length).toBeGreaterThan(0);
       expect(result.pagination.total).toBeGreaterThan(0);
     });
 
     it('should return paginated results', async () => {
-      const result = await getAllPractitioners({ page: 1, limit: 10 });
+      const admin = await createTestUser(Role.ADMIN);
+      const result = await getAllPractitioners(admin.user, { page: 1, limit: 10 });
 
       expect(result).toHaveProperty('practitioners');
       expect(result).toHaveProperty('pagination');
@@ -86,8 +87,9 @@ describe('Practitioner Service', () => {
 
   describe('getPractitionerById', () => {
     it('should throw error for non-existent practitioner', async () => {
+      const admin = await createTestUser(Role.ADMIN);
       await expect(
-        getPractitionerById('00000000-0000-0000-0000-000000000000')
+        getPractitionerById('00000000-0000-0000-0000-000000000000', admin.user)
       ).rejects.toThrow('Practitioner not found');
     });
   });
