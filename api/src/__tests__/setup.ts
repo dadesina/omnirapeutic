@@ -1,8 +1,12 @@
 import { execSync } from 'child_process';
 import { PrismaClient } from '@prisma/client';
 
-// Prisma Client will use DATABASE_URL from environment
-export const prisma = new PrismaClient();
+// Create Prisma Client that will be shared across all test code AND application code
+// By setting it on globalThis, the config/database singleton will reuse this instance
+const testPrisma = new PrismaClient();
+globalThis.prisma = testPrisma;
+
+export const prisma = testPrisma;
 
 // Setup: Run before all tests
 beforeAll(async () => {

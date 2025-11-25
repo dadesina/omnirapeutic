@@ -25,9 +25,11 @@ const prismaClientSingleton = () => {
 };
 
 // Singleton pattern: reuse existing client in development (hot reload)
+// In test environment, we need to use the same instance as the test setup
 const prisma = globalThis.prisma ?? prismaClientSingleton();
 
 // In development, attach to global to survive hot reloads
+// In test environment, this allows test setup to share the same instance
 if (process.env.NODE_ENV !== 'production') {
   globalThis.prisma = prisma;
 }
