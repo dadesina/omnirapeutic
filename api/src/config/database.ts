@@ -32,9 +32,18 @@ if (!globalThis.prisma) {
   globalThis.prisma = prismaClientSingleton();
 }
 
-// Export with non-null assertion since we ensure it's initialized above
-const prisma = globalThis.prisma!;
-export default prisma;
+// Create a proxy that always references globalThis.prisma dynamically
+// This prevents caching the instance at module load time
+const prismaProxy = new Proxy({} as PrismaClient, {
+  get(_target, prop) {
+    if (!globalThis.prisma) {
+      throw new Error('Prisma client not initialized');
+    }
+    return (globalThis.prisma as any)[prop];
+  }
+});
+
+export default prismaProxy;
 
 /**
  * Graceful shutdown handler
