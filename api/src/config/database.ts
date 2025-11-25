@@ -32,7 +32,9 @@ if (!globalThis.prisma) {
   globalThis.prisma = prismaClientSingleton();
 }
 
-export default globalThis.prisma;
+// Export with non-null assertion since we ensure it's initialized above
+const prisma = globalThis.prisma!;
+export default prisma;
 
 /**
  * Graceful shutdown handler
