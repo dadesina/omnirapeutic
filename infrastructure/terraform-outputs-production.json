@@ -1,0 +1,33 @@
+{
+  "aurora_cluster_endpoint": {
+    "sensitive": true,
+    "type": "string",
+    "value": "omnirapeutic-production.cluster-c65q0emgwv43.us-east-1.rds.amazonaws.com"
+  },
+  "aurora_database_name": {
+    "sensitive": false,
+    "type": "string",
+    "value": "omnirapeutic"
+  },
+  "kms_keys": {
+    "sensitive": false,
+    "type": [
+      "object",
+      {
+        "aurora": "string",
+        "s3": "string",
+        "secrets": "string"
+      }
+    ],
+    "value": {
+      "aurora": "arn:aws:kms:us-east-1:422475949365:key/d8b34c73-76de-4638-ac4e-a0f6131d41d4",
+      "s3": "arn:aws:kms:us-east-1:422475949365:key/20115407-91a5-49cf-8cc4-d785281ac830",
+      "secrets": "arn:aws:kms:us-east-1:422475949365:key/234b0421-2a7b-4658-ac31-41188f95521e"
+    }
+  },
+  "vpc_id": {
+    "sensitive": false,
+    "type": "string",
+    "value": "vpc-0a917f71d001fb146"
+  }
+}

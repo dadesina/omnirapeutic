@@ -1,0 +1,220 @@
+#!/bin/bash
+# Prerequisites Verification Script
+# Checks all requirements before Omnirapeutic deployment
+
+set -e
+
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+echo "============================================"
+echo "Omnirapeutic Prerequisites Checker"
+echo "============================================"
+echo ""
+
+PASSED=0
+FAILED=0
+WARNINGS=0
+
+# Check 1: Terraform
+echo -e "${BLUE}[1/8] Checking Terraform...${NC}"
+if command -v terraform &> /dev/null; then
+    TF_VERSION=$(terraform version -json 2>/dev/null | grep -o '"terraform_version":"[^"]*' | cut -d'"' -f4)
+    if [ -z "$TF_VERSION" ]; then
+        TF_VERSION=$(terraform version | head -n1 | grep -o 'v[0-9.]*' | cut -dv -f2)
+    fi
+
+    REQUIRED_VERSION="1.5.0"
+    if [ "$(printf '%s\n' "$REQUIRED_VERSION" "$TF_VERSION" | sort -V | head -n1)" = "$REQUIRED_VERSION" ]; then
+        echo -e "${GREEN}✓ Terraform v${TF_VERSION} (>= ${REQUIRED_VERSION} required)${NC}"
+        ((PASSED++))
+    else
+        echo -e "${RED}✗ Terraform v${TF_VERSION} is below required ${REQUIRED_VERSION}${NC}"
+        ((FAILED++))
+    fi
+else
+    echo -e "${RED}✗ Terraform not found${NC}"
+    echo "  Install: ./infrastructure/scripts/install-prerequisites.sh"
+    ((FAILED++))
+fi
+echo ""
+
+# Check 2: AWS CLI
+echo -e "${BLUE}[2/8] Checking AWS CLI...${NC}"
+if command -v aws &> /dev/null; then
+    AWS_VERSION=$(aws --version 2>&1 | cut -d' ' -f1 | cut -d'/' -f2)
+    echo -e "${GREEN}✓ AWS CLI v${AWS_VERSION}${NC}"
+    ((PASSED++))
+else
+    echo -e "${RED}✗ AWS CLI not found${NC}"
+    echo "  Install: ./infrastructure/scripts/install-prerequisites.sh"
+    ((FAILED++))
+fi
+echo ""
+
+# Check 3: Git
+echo -e "${BLUE}[3/8] Checking Git...${NC}"
+if command -v git &> /dev/null; then
+    GIT_VERSION=$(git --version | cut -d' ' -f3)
+    echo -e "${GREEN}✓ Git v${GIT_VERSION}${NC}"
+    ((PASSED++))
+else
+    echo -e "${RED}✗ Git not found${NC}"
+    ((FAILED++))
+fi
+echo ""
+
+# Check 4: AWS Credentials
+echo -e "${BLUE}[4/8] Checking AWS Credentials...${NC}"
+if aws sts get-caller-identity &> /dev/null; then
+    AWS_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+    AWS_USER=$(aws sts get-caller-identity --query Arn --output text | cut -d'/' -f2)
+    echo -e "${GREEN}✓ AWS credentials configured${NC}"
+    echo "  Account: $AWS_ACCOUNT"
+    echo "  User/Role: $AWS_USER"
+    ((PASSED++))
+else
+    echo -e "${RED}✗ AWS credentials not configured${NC}"
+    echo "  Run: aws configure"
+    echo "  Or set environment variables: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY"
+    ((FAILED++))
+fi
+echo ""
+
+# Check 5: AWS Region
+echo -e "${BLUE}[5/8] Checking AWS Region...${NC}"
+AWS_REGION=$(aws configure get region 2>/dev/null || echo "")
+if [ -n "$AWS_REGION" ]; then
+    echo -e "${GREEN}✓ AWS region configured: $AWS_REGION${NC}"
+    ((PASSED++))
+
+    if [ "$AWS_REGION" != "us-east-1" ]; then
+        echo -e "${YELLOW}  ⚠ Warning: Infrastructure is configured for us-east-1${NC}"
+        echo "    Update region in infrastructure/terraform/environments/*/variables.tf"
+        ((WARNINGS++))
+    fi
+else
+    echo -e "${YELLOW}⚠ AWS region not set, will use us-east-1 (default)${NC}"
+    ((WARNINGS++))
+fi
+echo ""
+
+# Check 6: Terraform State Backend
+echo -e "${BLUE}[6/8] Checking Terraform State Backend...${NC}"
+AWS_ACCOUNT=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo "")
+if [ -n "$AWS_ACCOUNT" ]; then
+    STATE_BUCKET="omnirapeutic-terraform-state-${AWS_ACCOUNT}"
+
+    if aws s3api head-bucket --bucket "$STATE_BUCKET" 2>/dev/null; then
+        echo -e "${GREEN}✓ Terraform state S3 bucket exists: $STATE_BUCKET${NC}"
+
+        # Check bucket versioning
+        VERSIONING=$(aws s3api get-bucket-versioning --bucket "$STATE_BUCKET" --query Status --output text 2>/dev/null || echo "")
+        if [ "$VERSIONING" == "Enabled" ]; then
+            echo -e "${GREEN}  ✓ Bucket versioning enabled${NC}"
+        else
+            echo -e "${YELLOW}  ⚠ Bucket versioning not enabled${NC}"
+            ((WARNINGS++))
+        fi
+
+        # Check bucket encryption
+        ENCRYPTION=$(aws s3api get-bucket-encryption --bucket "$STATE_BUCKET" 2>/dev/null && echo "enabled" || echo "disabled")
+        if [ "$ENCRYPTION" == "enabled" ]; then
+            echo -e "${GREEN}  ✓ Bucket encryption enabled${NC}"
+        else
+            echo -e "${YELLOW}  ⚠ Bucket encryption not enabled${NC}"
+            ((WARNINGS++))
+        fi
+
+        ((PASSED++))
+    else
+        echo -e "${YELLOW}⚠ Terraform state bucket not found: $STATE_BUCKET${NC}"
+        echo "  Create: See PREREQUISITES_SETUP_GUIDE.md section 4"
+        ((WARNINGS++))
+    fi
+
+    # Check DynamoDB lock table
+    if aws dynamodb describe-table --table-name terraform-state-lock &>/dev/null; then
+        echo -e "${GREEN}  ✓ DynamoDB lock table exists${NC}"
+    else
+        echo -e "${YELLOW}  ⚠ DynamoDB lock table not found${NC}"
+        echo "    Create: See PREREQUISITES_SETUP_GUIDE.md section 4"
+        ((WARNINGS++))
+    fi
+else
+    echo -e "${YELLOW}⚠ Cannot check (AWS credentials not configured)${NC}"
+    ((WARNINGS++))
+fi
+echo ""
+
+# Check 7: AWS BAA
+echo -e "${BLUE}[7/8] Checking AWS BAA (HIPAA Compliance)...${NC}"
+echo -e "${YELLOW}⚠ Manual verification required${NC}"
+echo "  1. Log into AWS Console → AWS Artifact"
+echo "  2. Verify 'AWS Business Associate Addendum' is accepted"
+echo "  3. Document BAA signature date and keep on file"
+echo ""
+echo "  ${RED}CRITICAL: Do not deploy production infrastructure with PHI until BAA is signed${NC}"
+((WARNINGS++))
+echo ""
+
+# Check 8: GitHub Configuration
+echo -e "${BLUE}[8/8] Checking GitHub Configuration...${NC}"
+if [ -d ".git" ]; then
+    REMOTE_URL=$(git remote get-url origin 2>/dev/null || echo "")
+    if [ -n "$REMOTE_URL" ]; then
+        echo -e "${GREEN}✓ Git repository configured${NC}"
+        echo "  Remote: $REMOTE_URL"
+        ((PASSED++))
+
+        if [[ "$REMOTE_URL" == *"github.com"* ]]; then
+            echo -e "${YELLOW}  ⚠ GitHub Actions CI/CD setup required:${NC}"
+            echo "    - Configure OIDC provider in AWS IAM"
+            echo "    - Add AWS_ROLE_ARN secret to GitHub"
+            echo "    See PREREQUISITES_SETUP_GUIDE.md section 6"
+            ((WARNINGS++))
+        fi
+    else
+        echo -e "${YELLOW}⚠ No git remote configured${NC}"
+        ((WARNINGS++))
+    fi
+else
+    echo -e "${YELLOW}⚠ Not a git repository${NC}"
+    echo "  Run: git init && git remote add origin <repository-url>"
+    ((WARNINGS++))
+fi
+echo ""
+
+# Summary
+echo "============================================"
+echo "Prerequisites Check Summary"
+echo "============================================"
+echo -e "${GREEN}✓ Passed: $PASSED${NC}"
+echo -e "${YELLOW}⚠ Warnings: $WARNINGS${NC}"
+echo -e "${RED}✗ Failed: $FAILED${NC}"
+echo ""
+
+if [ $FAILED -eq 0 ] && [ $WARNINGS -eq 0 ]; then
+    echo -e "${GREEN}✓ All prerequisites met!${NC}"
+    echo ""
+    echo "You can now deploy Phase 1 infrastructure:"
+    echo "  Option 1 (Automated): ./infrastructure/scripts/setup.sh"
+    echo "  Option 2 (Manual): cd infrastructure/terraform/environments/production && terraform init && terraform plan"
+    exit 0
+elif [ $FAILED -eq 0 ]; then
+    echo -e "${YELLOW}⚠ Prerequisites mostly met, but please review warnings${NC}"
+    echo ""
+    echo "Review warnings above before deploying to production."
+    echo "For development/testing, you can proceed with:"
+    echo "  ./infrastructure/scripts/setup.sh"
+    exit 0
+else
+    echo -e "${RED}✗ Prerequisites check failed${NC}"
+    echo ""
+    echo "Please resolve failed checks above before proceeding."
+    echo "See PREREQUISITES_SETUP_GUIDE.md for detailed setup instructions."
+    exit 1
+fi

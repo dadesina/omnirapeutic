@@ -1,0 +1,57 @@
+name: Terraform Apply
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'infrastructure/terraform/**'
+      - '.github/workflows/terraform-*.yml'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  terraform-apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: ./infrastructure/terraform/environments/production
+
+      - name: Terraform Plan
+        run: terraform plan -out=tfplan
+        working-directory: ./infrastructure/terraform/environments/production
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+        working-directory: ./infrastructure/terraform/environments/production
+
+      - name: Save Outputs
+        run: terraform output -json > terraform-outputs.json
+        working-directory: ./infrastructure/terraform/environments/production
+
+      - name: Upload Outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-outputs
+          path: ./infrastructure/terraform/environments/production/terraform-outputs.json
+          retention-days: 30

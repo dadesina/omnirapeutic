@@ -1,0 +1,107 @@
+// Prisma Schema for Omnirapeutic Healthcare Platform
+// Defines data models for User management, Patient records, Practitioners, and Audit logs
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User model - Core authentication and authorization
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String   // bcrypt hashed password
+  role      Role     @default(PATIENT)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  patient      Patient?
+  practitioner Practitioner?
+  auditLogs    AuditLog[]
+
+  @@index([email])
+  @@map("users")
+}
+
+// Role enumeration for RBAC
+enum Role {
+  ADMIN
+  PRACTITIONER
+  PATIENT
+}
+
+// Patient model - PHI (Protected Health Information)
+model Patient {
+  id                  String    @id @default(uuid())
+  userId              String    @unique
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Personal Information
+  firstName           String
+  lastName            String
+  dateOfBirth         DateTime
+
+  // Medical Information
+  medicalRecordNumber String    @unique
+  phoneNumber         String?
+  address             String?
+
+  // Timestamps
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([medicalRecordNumber])
+  @@map("patients")
+}
+
+// Practitioner model - Healthcare providers
+model Practitioner {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Personal Information
+  firstName      String
+  lastName       String
+
+  // Professional Information
+  licenseNumber  String   @unique
+  specialization String
+  phoneNumber    String?
+
+  // Timestamps
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([userId])
+  @@index([licenseNumber])
+  @@map("practitioners")
+}
+
+// AuditLog model - HIPAA compliance audit trail
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // Audit Information
+  action     String   // CREATE, READ, UPDATE, DELETE
+  resource   String   // patients, practitioners, users, etc.
+  resourceId String?  // ID of the resource being accessed
+  details    Json?    // Additional context (field changes, search params, etc.)
+  ipAddress  String?  // Client IP address
+
+  // Timestamp
+  timestamp  DateTime @default(now())
+
+  @@index([userId])
+  @@index([timestamp])
+  @@index([resource, resourceId])
+  @@map("audit_logs")
+}
