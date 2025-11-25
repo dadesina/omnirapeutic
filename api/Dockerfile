@@ -30,14 +30,16 @@ RUN apk add --no-cache wget
 # Copy package files
 COPY package*.json ./
 
+# Copy Prisma files before npm ci (needed for prisma generate postinstall hook)
+COPY --from=builder /app/prisma ./prisma
+
 # Install only production dependencies
 RUN npm ci --only=production
 
 # Copy built application from builder
 COPY --from=builder /app/dist ./dist
 
-# Copy Prisma files
-COPY --from=builder /app/prisma ./prisma
+# Copy generated Prisma client from builder
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 
