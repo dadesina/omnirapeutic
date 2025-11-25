@@ -26,24 +26,22 @@ const prismaClientSingleton = () => {
 
 // Singleton pattern: reuse existing client in development (hot reload)
 // In test environment, use the instance set by test setup
-// IMPORTANT: Always use globalThis.prisma directly - never cache in local variable
-// This ensures test setup can inject its instance before any imports
-if (!globalThis.prisma) {
-  globalThis.prisma = prismaClientSingleton();
+// IMPORTANT: In test mode, NEVER create an instance - only use what setup.ts provides
+if (process.env.NODE_ENV === 'test') {
+  // Test mode: setup.ts MUST have set globalThis.prisma
+  if (!globalThis.prisma) {
+    throw new Error('TEST ERROR: globalThis.prisma not set by setup.ts. Check test setup order.');
+  }
+} else {
+  // Production/development: create singleton if needed
+  if (!globalThis.prisma) {
+    globalThis.prisma = prismaClientSingleton();
+  }
 }
 
-// Create a proxy that always references globalThis.prisma dynamically
-// This prevents caching the instance at module load time
-const prismaProxy = new Proxy({} as PrismaClient, {
-  get(_target, prop) {
-    if (!globalThis.prisma) {
-      throw new Error('Prisma client not initialized');
-    }
-    return (globalThis.prisma as any)[prop];
-  }
-});
-
-export default prismaProxy;
+// Export globalThis.prisma directly (not a proxy)
+// TypeScript: Use non-null assertion since we ensure it exists above
+export default globalThis.prisma!;
 
 /**
  * Graceful shutdown handler
