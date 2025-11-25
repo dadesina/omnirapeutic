@@ -28,7 +28,6 @@ module.exports = {
   testTimeout: 10000,
   setupFilesAfterEnv: ['<rootDir>/src/__tests__/setup.ts'],
   moduleNameMapper: {
-    '^@/__tests__/__mocks__/faker$': '<rootDir>/src/__tests__/__mocks__/faker',
     '^@/(.*)$': '<rootDir>/src/$1',
   },
   globals: {
