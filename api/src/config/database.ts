@@ -25,23 +25,21 @@ const prismaClientSingleton = () => {
 };
 
 // Singleton pattern: reuse existing client in development (hot reload)
-// In test environment, we need to use the same instance as the test setup
-const prisma = globalThis.prisma ?? prismaClientSingleton();
-
-// In development, attach to global to survive hot reloads
-// In test environment, this allows test setup to share the same instance
-if (process.env.NODE_ENV !== 'production') {
-  globalThis.prisma = prisma;
+// In test environment, use the instance set by test setup
+// IMPORTANT: Always use globalThis.prisma directly - never cache in local variable
+// This ensures test setup can inject its instance before any imports
+if (!globalThis.prisma) {
+  globalThis.prisma = prismaClientSingleton();
 }
 
-export default prisma;
+export default globalThis.prisma;
 
 /**
  * Graceful shutdown handler
  * Ensures database connections are properly closed on application termination
  */
 export const disconnectDatabase = async (): Promise<void> => {
-  await prisma.$disconnect();
+  await globalThis.prisma!.$disconnect();
   console.log('Database connection closed');
 };
 
@@ -51,7 +49,7 @@ export const disconnectDatabase = async (): Promise<void> => {
  */
 export const checkDatabaseConnection = async (): Promise<boolean> => {
   try {
-    await prisma.$queryRaw`SELECT 1`;
+    await globalThis.prisma!.$queryRaw`SELECT 1`;
     return true;
   } catch (error) {
     console.error('Database connection failed:', error);
