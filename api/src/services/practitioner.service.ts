@@ -64,7 +64,7 @@ export const createPractitioner = async (
 export const getAllPractitioners = async (
   requestingUser: JwtPayload,
   filters: PractitionerFilters = {}
-): Promise<{ practitioners: Practitioner[]; total: number; page: number; limit: number }> => {
+): Promise<{ practitioners: Practitioner[]; pagination: { total: number; page: number; limit: number; totalPages: number } }> => {
   // RBAC: Only admins and practitioners can view all practitioners
   if (requestingUser.role !== Role.ADMIN && requestingUser.role !== Role.PRACTITIONER) {
     throw new Error('Forbidden: Insufficient permissions');
