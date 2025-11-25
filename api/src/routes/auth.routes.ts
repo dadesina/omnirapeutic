@@ -52,7 +52,7 @@ router.post('/register', async (req: Request, res: Response) => {
         resource: 'users',
         resourceId: result.user.id,
         details: { email: result.user.email, role: result.user.role },
-        ipAddress: req.ip
+        ipAddress: req.ip || '127.0.0.1'
       }
     });
 
@@ -113,11 +113,11 @@ router.post('/login', async (req: Request, res: Response) => {
     await prisma.auditLog.create({
       data: {
         userId: result.user.id,
-        action: 'READ',
+        action: 'LOGIN',
         resource: 'auth',
         resourceId: result.user.id,
         details: { action: 'login', email: result.user.email },
-        ipAddress: req.ip
+        ipAddress: req.ip || '127.0.0.1'
       }
     });
 
@@ -131,7 +131,7 @@ router.post('/login', async (req: Request, res: Response) => {
         action: 'READ',
         resource: 'auth',
         details: { action: 'login_failed', email: req.body.email, error: message },
-        ipAddress: req.ip
+        ipAddress: req.ip || '127.0.0.1'
       }
     });
 

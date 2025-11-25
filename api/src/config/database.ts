@@ -17,11 +17,31 @@ declare global {
 
 // Initialize Prisma Client with logging configuration
 const prismaClientSingleton = () => {
-  return new PrismaClient({
+  const client = new PrismaClient({
     log: process.env.NODE_ENV === 'development'
       ? ['query', 'info', 'warn', 'error']
       : ['error'],
   });
+
+  // HIPAA Compliance: Audit logs must be immutable
+  // Middleware to prevent updates and deletions of audit logs
+  client.$use(async (params, next) => {
+    if (params.model === 'AuditLog') {
+      if (params.action === 'update' || params.action === 'updateMany') {
+        throw new Error('Audit logs cannot be modified (HIPAA compliance requirement)');
+      }
+      // Block single delete always, but allow deleteMany in test environment for cleanup
+      if (params.action === 'delete') {
+        throw new Error('Audit logs cannot be deleted (HIPAA compliance requirement)');
+      }
+      if (params.action === 'deleteMany' && process.env.NODE_ENV !== 'test') {
+        throw new Error('Audit logs cannot be deleted (HIPAA compliance requirement)');
+      }
+    }
+    return next(params);
+  });
+
+  return client;
 };
 
 // Singleton pattern: reuse existing client in development (hot reload)

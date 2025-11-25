@@ -72,7 +72,7 @@ export const createPatient = async (
 export const getAllPatients = async (
   requestingUser: JwtPayload,
   filters: PatientFilters = {}
-): Promise<{ patients: Patient[]; total: number; page: number; limit: number }> => {
+): Promise<{ patients: Patient[]; pagination: { total: number; page: number; limit: number; totalPages: number } }> => {
   // RBAC: Only admins and practitioners can view all patients
   if (requestingUser.role !== Role.ADMIN && requestingUser.role !== Role.PRACTITIONER) {
     throw new Error('Forbidden: Insufficient permissions');
@@ -106,9 +106,12 @@ export const getAllPatients = async (
 
   return {
     patients,
-    total,
-    page,
-    limit
+    pagination: {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit)
+    }
   };
 };
 

@@ -64,7 +64,7 @@ router.post(
           resource: 'patients',
           resourceId: patient.id,
           details: { patientId: patient.id, medicalRecordNumber: patient.medicalRecordNumber },
-          ipAddress: req.ip
+          ipAddress: req.ip || '127.0.0.1'
         }
       });
 
@@ -121,7 +121,7 @@ router.get(
           action: 'READ',
           resource: 'patients',
           details: { action: 'list', page, limit, count: result.patients.length },
-          ipAddress: req.ip
+          ipAddress: req.ip || '127.0.0.1'
         }
       });
 
@@ -161,7 +161,7 @@ router.get('/:id', async (req: Request, res: Response) => {
         resource: 'patients',
         resourceId: id,
         details: { patientId: id, medicalRecordNumber: patient.medicalRecordNumber },
-        ipAddress: req.ip
+        ipAddress: req.ip || '127.0.0.1'
       }
     });
 
@@ -216,7 +216,7 @@ router.put(
             patientId: id,
             changes: { firstName, lastName, dateOfBirth, phoneNumber, address }
           },
-          ipAddress: req.ip
+          ipAddress: req.ip || '127.0.0.1'
         }
       });
 
@@ -269,7 +269,7 @@ router.delete(
           resource: 'patients',
           resourceId: id,
           details: { patientId: id },
-          ipAddress: req.ip
+          ipAddress: req.ip || '127.0.0.1'
         }
       });
 
