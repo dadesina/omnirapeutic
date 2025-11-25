@@ -11,6 +11,7 @@ import healthRouter from './routes/health';
 import authRouter from './routes/auth.routes';
 import patientRouter from './routes/patient.routes';
 import practitionerRouter from './routes/practitioner.routes';
+import btgRouter from './routes/btg.routes';
 
 export function createApp(): Application {
   const app: Application = express();
@@ -57,6 +58,7 @@ export function createApp(): Application {
   app.use('/api/auth', authRouter);
   app.use('/api/patients', patientRouter);
   app.use('/api/practitioners', practitionerRouter);
+  app.use('/api/admin/btg', btgRouter); // Break-the-Glass emergency access (ADMIN only)
 
   // 404 handler for undefined routes
   app.use((req: Request, res: Response) => {

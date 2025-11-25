@@ -20,9 +20,14 @@ model User {
   updatedAt DateTime @updatedAt
 
   // Relations
-  patient      Patient?
-  practitioner Practitioner?
-  auditLogs    AuditLog[]
+  patient                Patient?
+  practitioner           Practitioner?
+  auditLogs              AuditLog[]
+
+  // Break-the-Glass relations
+  btgGrantsGiven         BtgAccessGrant[] @relation("BtgGrantedBy")   // Grants this user created
+  btgGrantsReceived      BtgAccessGrant[] @relation("BtgGrantedTo")   // Grants this user received
+  btgGrantsRevoked       BtgAccessGrant[] @relation("BtgRevokedBy")   // Grants this user revoked
 
   @@index([email])
   @@map("users")
@@ -33,31 +38,6 @@ enum Role {
   ADMIN
   PRACTITIONER
   PATIENT
-}
-
-// Patient model - PHI (Protected Health Information)
-model Patient {
-  id                  String    @id @default(uuid())
-  userId              String    @unique
-  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  // Personal Information
-  firstName           String
-  lastName            String
-  dateOfBirth         DateTime
-
-  // Medical Information
-  medicalRecordNumber String    @unique
-  phoneNumber         String?
-  address             String?
-
-  // Timestamps
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
-
-  @@index([userId])
-  @@index([medicalRecordNumber])
-  @@map("patients")
 }
 
 // Practitioner model - Healthcare providers
@@ -104,4 +84,75 @@ model AuditLog {
   @@index([timestamp])
   @@index([resource, resourceId])
   @@map("audit_logs")
+}
+
+// BtgAccessGrant model - Break-the-Glass Emergency Access
+// HIPAA § 164.308(a)(4)(ii)(C) - Emergency Access Procedure
+// Provides time-bound, audited emergency access to patient records
+model BtgAccessGrant {
+  id                String    @id @default(uuid())
+
+  // Who granted the access (must be ADMIN)
+  grantedByUserId   String
+  grantedByUser     User      @relation("BtgGrantedBy", fields: [grantedByUserId], references: [id], onDelete: Cascade)
+
+  // Who receives the emergency access (typically ADMIN for technical investigations)
+  grantedToUserId   String
+  grantedToUser     User      @relation("BtgGrantedTo", fields: [grantedToUserId], references: [id], onDelete: Cascade)
+
+  // Which patient record is being accessed
+  patientId         String
+  patient           Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  // Emergency access details
+  justification     String    // Mandatory: Why is emergency access needed?
+  durationMinutes   Int       // How long is access granted (e.g., 60, 120, 240)
+  expiresAt         DateTime  // Calculated: createdAt + durationMinutes
+
+  // Revocation (if access is manually revoked before expiration)
+  revokedAt         DateTime?
+  revokedByUserId   String?
+  revokedByUser     User?     @relation("BtgRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+  revokedReason     String?
+
+  // Audit trail
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Indexes for efficient queries
+  @@index([grantedToUserId, patientId, expiresAt]) // Check active grants for user accessing patient
+  @@index([patientId])                              // All grants for a patient
+  @@index([grantedByUserId])                        // All grants created by an admin
+  @@index([expiresAt])                              // Cleanup expired grants
+  @@index([createdAt])                              // Audit timeline
+
+  @@map("btg_access_grants")
+}
+
+// Update Patient model to include BTG relation
+model Patient {
+  id                  String             @id @default(uuid())
+  userId              String             @unique
+  user                User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Personal Information
+  firstName           String
+  lastName            String
+  dateOfBirth         DateTime
+
+  // Medical Information
+  medicalRecordNumber String             @unique
+  phoneNumber         String?
+  address             String?
+
+  // Timestamps
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  // Relations
+  btgAccessGrants     BtgAccessGrant[]
+
+  @@index([userId])
+  @@index([medicalRecordNumber])
+  @@map("patients")
 }
