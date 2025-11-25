@@ -7,6 +7,7 @@
 
 import request from 'supertest';
 import { Application } from 'express';
+import { createApp } from '../app';
 import { prisma } from './setup';
 import { createTestUser, generateExpiredToken, generateInvalidToken } from './helpers/auth.helper';
 import { Role } from '@prisma/client';
@@ -14,9 +15,8 @@ import { Role } from '@prisma/client';
 let app: Application;
 
 describe('Authentication Endpoints', () => {
-  beforeAll(async () => {
-    // Dynamic import AFTER setup.ts runs to ensure correct Prisma instance
-    const { createApp } = await import('../app');
+  beforeAll(() => {
+    // Create app AFTER setup.ts runs to ensure correct Prisma instance
     app = createApp();
   });
   describe('POST /api/auth/register', () => {
