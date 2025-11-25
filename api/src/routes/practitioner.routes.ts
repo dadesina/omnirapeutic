@@ -62,7 +62,7 @@ router.post(
           resource: 'practitioners',
           resourceId: practitioner.id,
           details: { practitionerId: practitioner.id, licenseNumber: practitioner.licenseNumber },
-          ipAddress: req.ip
+          ipAddress: req.ip || '127.0.0.1'
         }
       });
 
@@ -115,7 +115,7 @@ router.get(
           action: 'READ',
           resource: 'practitioners',
           details: { action: 'list', page, limit, count: result.practitioners.length },
-          ipAddress: req.ip
+          ipAddress: req.ip || '127.0.0.1'
         }
       });
 
@@ -155,7 +155,7 @@ router.get('/:id', async (req: Request, res: Response) => {
         resource: 'practitioners',
         resourceId: id,
         details: { practitionerId: id, licenseNumber: practitioner.licenseNumber },
-        ipAddress: req.ip
+        ipAddress: req.ip || '127.0.0.1'
       }
     });
 
@@ -202,7 +202,7 @@ router.put('/:id', async (req: Request, res: Response) => {
           practitionerId: id,
           changes: { firstName, lastName, specialization, phoneNumber }
         },
-        ipAddress: req.ip
+        ipAddress: req.ip || '127.0.0.1'
       }
     });
 
@@ -249,7 +249,7 @@ router.delete(
           resource: 'practitioners',
           resourceId: id,
           details: { practitionerId: id },
-          ipAddress: req.ip
+          ipAddress: req.ip || '127.0.0.1'
         }
       });
 

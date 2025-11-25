@@ -102,9 +102,12 @@ export const getAllPractitioners = async (
 
   return {
     practitioners,
-    total,
-    page,
-    limit
+    pagination: {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit)
+    }
   };
 };
 
