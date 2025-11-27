@@ -320,8 +320,8 @@ describe('Progress Note Endpoints', () => {
         .set('Authorization', `Bearer ${admin.token}`)
         .expect(200);
 
-      expect(response.body.notes).toHaveLength(3);
-      expect(response.body.pagination.total).toBe(3);
+      expect(response.body.progressNotes).toHaveLength(3);
+      expect(response.body.total).toBe(3);
     });
 
     it('should respect pagination parameters', async () => {
@@ -347,8 +347,8 @@ describe('Progress Note Endpoints', () => {
         .set('Authorization', `Bearer ${admin.token}`)
         .expect(200);
 
-      expect(response.body.notes).toHaveLength(2);
-      expect(response.body.pagination.totalPages).toBe(3);
+      expect(response.body.progressNotes).toHaveLength(2);
+      expect(response.body.totalPages).toBe(3);
     });
 
     it('should enforce multi-tenancy', async () => {

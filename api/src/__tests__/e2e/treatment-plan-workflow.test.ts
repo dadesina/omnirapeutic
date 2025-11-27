@@ -9,8 +9,8 @@
 import { Role, GoalType, GoalStatus, TreatmentPlanStatus } from '@prisma/client';
 import { createTestUser } from '../helpers/auth.helper';
 import { createCompleteTestPatient } from '../helpers/factories';
-import { createTestServiceCode } from '../helpers/service-code.helper';
-import { createTestAuthorization } from '../helpers/insurance.helper';
+import { createStandardABACode } from '../helpers/service-code.helper';
+import { createTestAuthorization } from '../helpers/appointment.helper';
 import {
   createTreatmentPlan,
   getTreatmentPlanById,
@@ -37,7 +37,7 @@ describe('Complete Treatment Plan Workflow (E2E)', () => {
   it('should handle full patient treatment journey', async () => {
     // Step 1: Create practitioner and patient
     const practitioner = await createTestUser(Role.PRACTITIONER);
-    const { patient, patientUser } = await createCompleteTestPatient(
+    const { patient, user: patientUser } = await createCompleteTestPatient(
       'Patient123!@#',
       practitioner.organizationId!
     );
@@ -49,7 +49,8 @@ describe('Complete Treatment Plan Workflow (E2E)', () => {
         title: 'ABA Therapy Treatment Plan - Comprehensive',
         description: 'Comprehensive ABA therapy plan focusing on communication and social skills',
         startDate: new Date(),
-        targetEndDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000), // 180 days
+        endDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000), // 180 days
+        reviewDate: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000), // 60 days
       },
       practitioner.user
     );
@@ -95,12 +96,11 @@ describe('Complete Treatment Plan Workflow (E2E)', () => {
     expect(goals).toHaveLength(2);
 
     // Step 4: Create service code and authorization for billing
-    const serviceCode = await createTestServiceCode({
-      organizationId: practitioner.organizationId!,
-    });
+    const serviceCode = await createStandardABACode(practitioner.user);
 
     const authorization = await createTestAuthorization({
       patientId: patient.id,
+      serviceCodeId: serviceCode.id,
       organizationId: practitioner.organizationId!,
     });
 
@@ -109,7 +109,7 @@ describe('Complete Treatment Plan Workflow (E2E)', () => {
       data: {
         organizationId: practitioner.organizationId!,
         patientId: patient.id,
-        practitionerId: practitioner.userId,
+        practitionerId: practitioner.user.userId,
         serviceCodeId: serviceCode.id,
         authorizationId: authorization.id,
         startTime: new Date(),
@@ -195,7 +195,7 @@ describe('Complete Treatment Plan Workflow (E2E)', () => {
       { page: 1, limit: 10 }
     );
     expect(commDataPoints.dataPoints).toHaveLength(3);
-    expect(commDataPoints.pagination.total).toBe(3);
+    expect(commDataPoints.total).toBe(3);
 
     const socialDataPoints = await getDataPointsByGoal(
       socialGoal.id,
@@ -214,20 +214,27 @@ describe('Complete Treatment Plan Workflow (E2E)', () => {
     expect(progress.progress.percentageChange).toBeGreaterThan(0);
 
     // Step 10: Verify patient can access their own data
-    const patientTreatmentPlan = await getTreatmentPlanById(treatmentPlan.id, patientUser.user);
+    const patientJwt = {
+      userId: patientUser.id,
+      email: patientUser.email,
+      role: patientUser.role,
+      organizationId: patientUser.organizationId,
+      isSuperAdmin: patientUser.isSuperAdmin,
+    };
+    const patientTreatmentPlan = await getTreatmentPlanById(treatmentPlan.id, patientJwt);
     expect(patientTreatmentPlan.id).toBe(treatmentPlan.id);
 
-    const patientGoals = await getGoalsByTreatmentPlan(treatmentPlan.id, patientUser.user);
+    const patientGoals = await getGoalsByTreatmentPlan(treatmentPlan.id, patientJwt);
     expect(patientGoals).toHaveLength(2);
 
-    const patientProgress = await calculateGoalProgress(communicationGoal.id, patientUser.user);
+    const patientProgress = await calculateGoalProgress(communicationGoal.id, patientJwt);
     expect(patientProgress.goal.id).toBe(communicationGoal.id);
 
     // Step 11: Verify session and progress note are accessible
-    const patientSession = await getSessionById(session.id, patientUser.user);
+    const patientSession = await getSessionById(session.id, patientJwt);
     expect(patientSession.id).toBe(session.id);
 
-    const patientProgressNote = await getProgressNoteBySession(session.id, patientUser.user);
+    const patientProgressNote = await getProgressNoteBySession(session.id, patientJwt);
     expect(patientProgressNote.sessionId).toBe(session.id);
 
     // Final verification: Complete workflow integrity
@@ -252,7 +259,8 @@ describe('Complete Treatment Plan Workflow (E2E)', () => {
         title: 'Multi-Session Progress Tracking',
         description: 'Testing cumulative progress across multiple sessions',
         startDate: new Date(),
-        targetEndDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
+        endDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
+        reviewDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       },
       practitioner.user
     );
@@ -271,12 +279,11 @@ describe('Complete Treatment Plan Workflow (E2E)', () => {
       practitioner.user
     );
 
-    const serviceCode = await createTestServiceCode({
-      organizationId: practitioner.organizationId!,
-    });
+    const serviceCode = await createStandardABACode(practitioner.user);
 
     const authorization = await createTestAuthorization({
       patientId: patient.id,
+      serviceCodeId: serviceCode.id,
       organizationId: practitioner.organizationId!,
     });
 
@@ -293,7 +300,7 @@ describe('Complete Treatment Plan Workflow (E2E)', () => {
         data: {
           organizationId: practitioner.organizationId!,
           patientId: patient.id,
-          practitionerId: practitioner.userId,
+          practitionerId: practitioner.user.userId,
           serviceCodeId: serviceCode.id,
           authorizationId: authorization.id,
           startTime: new Date(Date.now() + i * 24 * 60 * 60 * 1000),
@@ -341,6 +348,6 @@ describe('Complete Treatment Plan Workflow (E2E)', () => {
     expect(finalProgress.progress.trend).toBe('IMPROVING');
 
     // Verify progress calculation shows improvement from baseline
-    expect(finalProgress.progress.latestValue).toBeGreaterThan(goal.baseline.value);
+    expect(finalProgress.progress.latestValue).toBeGreaterThan((goal.baseline as any).value);
   });
 });

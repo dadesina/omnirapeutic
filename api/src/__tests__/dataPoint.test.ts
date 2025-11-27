@@ -18,6 +18,7 @@ import { Application } from 'express';
 import { prisma } from './setup';
 import { createTestUser } from './helpers/auth.helper';
 import {
+  createTestTreatmentPlan,
   createTestGoal,
   createTestDataPoint,
 } from './helpers/treatmentPlan.helper';
@@ -35,7 +36,11 @@ describe('Data Point Endpoints', () => {
   describe('POST /api/data-points - Create Data Point', () => {
     it('should create data point as ADMIN', async () => {
       const admin = await createTestUser(Role.ADMIN);
+      const treatmentPlan = await createTestTreatmentPlan({
+        organizationId: admin.organizationId!,
+      });
       const goal = await createTestGoal({
+        treatmentPlanId: treatmentPlan.id,
         organizationId: admin.organizationId!,
       });
 
@@ -59,7 +64,11 @@ describe('Data Point Endpoints', () => {
 
     it('should create data point as PRACTITIONER', async () => {
       const practitioner = await createTestUser(Role.PRACTITIONER);
+      const treatmentPlan = await createTestTreatmentPlan({
+        organizationId: practitioner.organizationId!,
+      });
       const goal = await createTestGoal({
+        treatmentPlanId: treatmentPlan.id,
         organizationId: practitioner.organizationId!,
       });
 
@@ -102,7 +111,11 @@ describe('Data Point Endpoints', () => {
 
     it('should reject creation with non-numeric value', async () => {
       const admin = await createTestUser(Role.ADMIN);
+      const treatmentPlan = await createTestTreatmentPlan({
+        organizationId: admin.organizationId!,
+      });
       const goal = await createTestGoal({
+        treatmentPlanId: treatmentPlan.id,
         organizationId: admin.organizationId!,
       });
 
@@ -119,7 +132,11 @@ describe('Data Point Endpoints', () => {
 
     it('should create data point with optional sessionId', async () => {
       const admin = await createTestUser(Role.ADMIN);
+      const treatmentPlan = await createTestTreatmentPlan({
+        organizationId: admin.organizationId!,
+      });
       const goal = await createTestGoal({
+        treatmentPlanId: treatmentPlan.id,
         organizationId: admin.organizationId!,
       });
       const session = await createTestSession({
@@ -144,7 +161,11 @@ describe('Data Point Endpoints', () => {
   describe('POST /api/data-points/bulk - Bulk Create Data Points', () => {
     it('should bulk create data points as ADMIN', async () => {
       const admin = await createTestUser(Role.ADMIN);
+      const treatmentPlan = await createTestTreatmentPlan({
+        organizationId: admin.organizationId!,
+      });
       const goal = await createTestGoal({
+        treatmentPlanId: treatmentPlan.id,
         organizationId: admin.organizationId!,
       });
 
@@ -160,13 +181,16 @@ describe('Data Point Endpoints', () => {
         .send({ dataPoints })
         .expect(201);
 
-      expect(response.body.dataPoints).toHaveLength(3);
-      expect(response.body.count).toBe(3);
+      expect(response.body).toHaveLength(3);
     });
 
     it('should bulk create as PRACTITIONER', async () => {
       const practitioner = await createTestUser(Role.PRACTITIONER);
+      const treatmentPlan = await createTestTreatmentPlan({
+        organizationId: practitioner.organizationId!,
+      });
       const goal = await createTestGoal({
+        treatmentPlanId: treatmentPlan.id,
         organizationId: practitioner.organizationId!,
       });
 
@@ -181,7 +205,7 @@ describe('Data Point Endpoints', () => {
         })
         .expect(201);
 
-      expect(response.body.count).toBe(2);
+      expect(response.body).toHaveLength(2);
     });
 
     it('should reject bulk creation as PATIENT', async () => {
@@ -208,7 +232,11 @@ describe('Data Point Endpoints', () => {
 
     it('should reject invalid data point in bulk', async () => {
       const admin = await createTestUser(Role.ADMIN);
+      const treatmentPlan = await createTestTreatmentPlan({
+        organizationId: admin.organizationId!,
+      });
       const goal = await createTestGoal({
+        treatmentPlanId: treatmentPlan.id,
         organizationId: admin.organizationId!,
       });
 
@@ -228,7 +256,11 @@ describe('Data Point Endpoints', () => {
   describe('GET /api/goals/:goalId/data-points - Get Data Points by Goal', () => {
     it('should retrieve data points for goal', async () => {
       const admin = await createTestUser(Role.ADMIN);
+      const treatmentPlan = await createTestTreatmentPlan({
+        organizationId: admin.organizationId!,
+      });
       const goal = await createTestGoal({
+        treatmentPlanId: treatmentPlan.id,
         organizationId: admin.organizationId!,
       });
 
@@ -243,12 +275,16 @@ describe('Data Point Endpoints', () => {
         .expect(200);
 
       expect(response.body.dataPoints).toHaveLength(3);
-      expect(response.body.pagination.total).toBe(3);
+      expect(response.body.total).toBe(3);
     });
 
     it('should respect pagination parameters', async () => {
       const admin = await createTestUser(Role.ADMIN);
+      const treatmentPlan = await createTestTreatmentPlan({
+        organizationId: admin.organizationId!,
+      });
       const goal = await createTestGoal({
+        treatmentPlanId: treatmentPlan.id,
         organizationId: admin.organizationId!,
       });
 
@@ -267,12 +303,16 @@ describe('Data Point Endpoints', () => {
         .expect(200);
 
       expect(response.body.dataPoints).toHaveLength(2);
-      expect(response.body.pagination.totalPages).toBe(3);
+      expect(response.body.totalPages).toBe(3);
     });
 
     it('should filter by date range', async () => {
       const admin = await createTestUser(Role.ADMIN);
+      const treatmentPlan = await createTestTreatmentPlan({
+        organizationId: admin.organizationId!,
+      });
       const goal = await createTestGoal({
+        treatmentPlanId: treatmentPlan.id,
         organizationId: admin.organizationId!,
       });
 
@@ -296,8 +336,11 @@ describe('Data Point Endpoints', () => {
         date: new Date(),
       });
 
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+
       const response = await request(app)
-        .get(`/api/goals/${goal.id}/data-points?startDate=${new Date().toISOString()}`)
+        .get(`/api/goals/${goal.id}/data-points?startDate=${todayStart.toISOString()}`)
         .set('Authorization', `Bearer ${admin.token}`)
         .expect(200);
 
@@ -307,7 +350,11 @@ describe('Data Point Endpoints', () => {
 
     it('should reject invalid pagination parameters', async () => {
       const admin = await createTestUser(Role.ADMIN);
+      const treatmentPlan = await createTestTreatmentPlan({
+        organizationId: admin.organizationId!,
+      });
       const goal = await createTestGoal({
+        treatmentPlanId: treatmentPlan.id,
         organizationId: admin.organizationId!,
       });
 
@@ -320,7 +367,11 @@ describe('Data Point Endpoints', () => {
     it('should enforce multi-tenancy', async () => {
       const admin1 = await createTestUser(Role.ADMIN);
       const admin2 = await createTestUser(Role.ADMIN);
+      const treatmentPlan = await createTestTreatmentPlan({
+        organizationId: admin2.organizationId!,
+      });
       const goal = await createTestGoal({
+        treatmentPlanId: treatmentPlan.id,
         organizationId: admin2.organizationId!,
       });
 
@@ -337,7 +388,11 @@ describe('Data Point Endpoints', () => {
       const session = await createTestSession({
         organizationId: admin.organizationId!,
       });
+      const treatmentPlan = await createTestTreatmentPlan({
+        organizationId: admin.organizationId!,
+      });
       const goal = await createTestGoal({
+        treatmentPlanId: treatmentPlan.id,
         organizationId: admin.organizationId!,
       });
 
@@ -374,12 +429,17 @@ describe('Data Point Endpoints', () => {
   describe('DELETE /api/data-points/:id - Delete Data Point', () => {
     it('should delete data point as ADMIN', async () => {
       const admin = await createTestUser(Role.ADMIN);
+      const treatmentPlan = await createTestTreatmentPlan({
+        organizationId: admin.organizationId!,
+      });
       const goal = await createTestGoal({
+        treatmentPlanId: treatmentPlan.id,
         organizationId: admin.organizationId!,
       });
       const dataPoint = await createTestDataPoint({
         goalId: goal.id,
         organizationId: admin.organizationId!,
+        value: 10,
       });
 
       const response = await request(app)
@@ -392,12 +452,17 @@ describe('Data Point Endpoints', () => {
 
     it('should reject deletion as PRACTITIONER', async () => {
       const practitioner = await createTestUser(Role.PRACTITIONER);
+      const treatmentPlan = await createTestTreatmentPlan({
+        organizationId: practitioner.organizationId!,
+      });
       const goal = await createTestGoal({
+        treatmentPlanId: treatmentPlan.id,
         organizationId: practitioner.organizationId!,
       });
       const dataPoint = await createTestDataPoint({
         goalId: goal.id,
         organizationId: practitioner.organizationId!,
+        value: 10,
       });
 
       await request(app)
@@ -409,12 +474,17 @@ describe('Data Point Endpoints', () => {
     it('should reject deletion as PATIENT', async () => {
       const admin = await createTestUser(Role.ADMIN);
       const patientUser = await createTestUser(Role.PATIENT);
+      const treatmentPlan = await createTestTreatmentPlan({
+        organizationId: admin.organizationId!,
+      });
       const goal = await createTestGoal({
+        treatmentPlanId: treatmentPlan.id,
         organizationId: admin.organizationId!,
       });
       const dataPoint = await createTestDataPoint({
         goalId: goal.id,
         organizationId: admin.organizationId!,
+        value: 10,
       });
 
       await request(app)
@@ -435,12 +505,17 @@ describe('Data Point Endpoints', () => {
     it('should enforce multi-tenancy on deletion', async () => {
       const admin1 = await createTestUser(Role.ADMIN);
       const admin2 = await createTestUser(Role.ADMIN);
+      const treatmentPlan = await createTestTreatmentPlan({
+        organizationId: admin2.organizationId!,
+      });
       const goal = await createTestGoal({
+        treatmentPlanId: treatmentPlan.id,
         organizationId: admin2.organizationId!,
       });
       const dataPoint = await createTestDataPoint({
         goalId: goal.id,
         organizationId: admin2.organizationId!,
+        value: 10,
       });
 
       await request(app)
