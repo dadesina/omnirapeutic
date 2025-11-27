@@ -12,6 +12,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getPatientByUserId = exports.deletePatient = exports.updatePatient = exports.getPatientById = exports.getAllPatients = exports.createPatient = void 0;
 const client_1 = require("@prisma/client");
 const database_1 = __importDefault(require("../config/database"));
+const btg_service_1 = require("./btg.service");
 /**
  * Create a new patient (Admin only)
  */
@@ -20,14 +21,40 @@ const createPatient = async (data, requestingUser) => {
     if (requestingUser.role !== client_1.Role.ADMIN) {
         throw new Error('Forbidden: Only administrators can create patients');
     }
+    // Organization scoping: Regular admins can only create patients in their org
+    // Super Admins must explicitly provide organizationId
+    if (!requestingUser.isSuperAdmin && data.organizationId !== requestingUser.organizationId) {
+        throw new Error('Forbidden: You can only create patients in your own organization');
+    }
     // Validate date of birth is in the past
     if (new Date(data.dateOfBirth) > new Date()) {
         throw new Error('Date of birth must be in the past');
+    }
+    // Validate that the user belongs to the same organization
+    const user = await database_1.default.user.findUnique({
+        where: { id: data.userId }
+    });
+    if (!user) {
+        throw new Error('User not found');
+    }
+    if (user.organizationId !== data.organizationId) {
+        throw new Error('User must belong to the same organization as the patient');
+    }
+    // Check for duplicate MRN within the organization
+    const existingPatient = await database_1.default.patient.findFirst({
+        where: {
+            organizationId: data.organizationId,
+            medicalRecordNumber: data.medicalRecordNumber
+        }
+    });
+    if (existingPatient) {
+        throw new Error('Medical record number already exists in this organization');
     }
     // Create patient
     const patient = await database_1.default.patient.create({
         data: {
             userId: data.userId,
+            organizationId: data.organizationId,
             firstName: data.firstName,
             lastName: data.lastName,
             dateOfBirth: new Date(data.dateOfBirth),
@@ -51,7 +78,7 @@ const getAllPatients = async (requestingUser, filters = {}) => {
     const limit = filters.limit || 20;
     const skip = (page - 1) * limit;
     // Build where clause for search
-    const where = filters.search
+    const searchWhere = filters.search
         ? {
             OR: [
                 { firstName: { contains: filters.search, mode: 'insensitive' } },
@@ -60,6 +87,11 @@ const getAllPatients = async (requestingUser, filters = {}) => {
             ]
         }
         : {};
+    // Organization scoping: Super Admins see all orgs, regular users see only their org
+    const where = { ...searchWhere };
+    if (!requestingUser.isSuperAdmin) {
+        where.organizationId = requestingUser.organizationId;
+    }
     // Get patients with pagination
     const [patients, total] = await Promise.all([
         database_1.default.patient.findMany({
@@ -72,17 +104,22 @@ const getAllPatients = async (requestingUser, filters = {}) => {
     ]);
     return {
         patients,
-        total,
-        page,
-        limit
+        pagination: {
+            total,
+            page,
+            limit,
+            totalPages: Math.ceil(total / limit)
+        }
     };
 };
 exports.getAllPatients = getAllPatients;
 /**
  * Get patient by ID with RBAC
- * - Admin: can view any patient
- * - Practitioner: can view any patient
+ * - Super Admin: can view any patient in any organization
+ * - Admin: can view patients in their organization
+ * - Practitioner: can view patients in their organization
  * - Patient: can only view own record
+ * - BTG Grant: ADMIN with active Break-the-Glass grant can view patient
  */
 const getPatientById = async (patientId, requestingUser) => {
     const patient = await database_1.default.patient.findUnique({
@@ -92,10 +129,23 @@ const getPatientById = async (patientId, requestingUser) => {
         throw new Error('Patient not found');
     }
     // RBAC: Check permissions
+    const isSuperAdmin = requestingUser.isSuperAdmin;
     const isAdmin = requestingUser.role === client_1.Role.ADMIN;
     const isPractitioner = requestingUser.role === client_1.Role.PRACTITIONER;
     const isOwner = patient.userId === requestingUser.userId;
-    if (!isAdmin && !isPractitioner && !isOwner) {
+    const isSameOrg = patient.organizationId === requestingUser.organizationId;
+    // BTG: Check for active Break-the-Glass emergency access grant
+    const hasEmergencyAccess = await (0, btg_service_1.hasActiveBtgAccess)(requestingUser.userId, patientId);
+    // Super Admins can access any patient
+    if (isSuperAdmin) {
+        return patient;
+    }
+    // Organization boundary check: Users can only access patients in their org
+    if (!isSameOrg && !hasEmergencyAccess) {
+        throw new Error('Forbidden: You can only access patients in your organization');
+    }
+    // Role-based checks within organization
+    if (!isAdmin && !isPractitioner && !isOwner && !hasEmergencyAccess) {
         throw new Error('Forbidden: You can only view your own patient record');
     }
     return patient;
@@ -115,6 +165,10 @@ const updatePatient = async (patientId, data, requestingUser) => {
     });
     if (!existingPatient) {
         throw new Error('Patient not found');
+    }
+    // Organization boundary check: Regular admins can only update patients in their org
+    if (!requestingUser.isSuperAdmin && existingPatient.organizationId !== requestingUser.organizationId) {
+        throw new Error('Forbidden: You can only update patients in your organization');
     }
     // Validate date of birth if provided
     if (data.dateOfBirth && new Date(data.dateOfBirth) > new Date()) {
@@ -148,6 +202,10 @@ const deletePatient = async (patientId, requestingUser) => {
     });
     if (!patient) {
         throw new Error('Patient not found');
+    }
+    // Organization boundary check: Regular admins can only delete patients in their org
+    if (!requestingUser.isSuperAdmin && patient.organizationId !== requestingUser.organizationId) {
+        throw new Error('Forbidden: You can only delete patients in your organization');
     }
     // Delete patient (cascade will handle user deletion if configured)
     await database_1.default.patient.delete({

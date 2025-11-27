@@ -22,8 +22,18 @@ describe('Patient Endpoints', () => {
   });
   describe('POST /api/patients - Create Patient', () => {
     it('should create a new patient as ADMIN', async () => {
-      const admin = await createTestUser(Role.ADMIN);
-      const patientUser = await createTestUser(Role.PATIENT);
+      // Create shared organization for this test
+      const org = await prisma.organization.create({
+        data: {
+          name: 'Test Clinic',
+          type: 'CLINIC',
+          status: 'ACTIVE',
+          tier: 'TRIAL'
+        }
+      });
+
+      const admin = await createTestUser(Role.ADMIN, false, org.id);
+      const patientUser = await createTestUser(Role.PATIENT, false, org.id);
 
       const patientData = {
         userId: patientUser.id,
@@ -129,10 +139,20 @@ describe('Patient Endpoints', () => {
     });
 
     it('should reject patient creation with duplicate medical record number', async () => {
-      const admin = await createTestUser(Role.ADMIN);
-      const { patient: existingPatient } = await createCompleteTestPatient();
+      // Create shared organization
+      const org = await prisma.organization.create({
+        data: {
+          name: 'Test Clinic',
+          type: 'CLINIC',
+          status: 'ACTIVE',
+          tier: 'TRIAL'
+        }
+      });
 
-      const patientUser = await createTestUser(Role.PATIENT);
+      const admin = await createTestUser(Role.ADMIN, false, org.id);
+      const { patient: existingPatient } = await createCompleteTestPatient('Test123!@#', org.id);
+
+      const patientUser = await createTestUser(Role.PATIENT, false, org.id);
       const patientData = {
         userId: patientUser.id,
         firstName: 'John',
@@ -154,9 +174,19 @@ describe('Patient Endpoints', () => {
 
   describe('GET /api/patients - List Patients', () => {
     it('should list all patients as ADMIN', async () => {
-      const admin = await createTestUser(Role.ADMIN);
-      await createCompleteTestPatient();
-      await createCompleteTestPatient();
+      // Create shared organization
+      const org = await prisma.organization.create({
+        data: {
+          name: 'Test Clinic',
+          type: 'CLINIC',
+          status: 'ACTIVE',
+          tier: 'TRIAL'
+        }
+      });
+
+      const admin = await createTestUser(Role.ADMIN, false, org.id);
+      await createCompleteTestPatient('Test123!@#', org.id);
+      await createCompleteTestPatient('Test123!@#', org.id);
 
       const response = await request(app)
         .get('/api/patients')
@@ -166,7 +196,7 @@ describe('Patient Endpoints', () => {
       expect(response.body).toHaveProperty('patients');
       expect(response.body).toHaveProperty('pagination');
       expect(Array.isArray(response.body.patients)).toBe(true);
-      expect(response.body.patients.length).toBeGreaterThan(0);
+      expect(response.body.patients.length).toBe(2); // Should see exactly 2 patients from same org
 
       // Verify audit log for PHI access
       const auditLogs = await prisma.auditLog.findMany({
@@ -180,8 +210,18 @@ describe('Patient Endpoints', () => {
     });
 
     it('should list all patients as PRACTITIONER', async () => {
-      const practitioner = await createTestUser(Role.PRACTITIONER);
-      await createCompleteTestPatient();
+      // Create shared organization
+      const org = await prisma.organization.create({
+        data: {
+          name: 'Test Clinic',
+          type: 'CLINIC',
+          status: 'ACTIVE',
+          tier: 'TRIAL'
+        }
+      });
+
+      const practitioner = await createTestUser(Role.PRACTITIONER, false, org.id);
+      await createCompleteTestPatient('Test123!@#', org.id);
 
       const response = await request(app)
         .get('/api/patients')
@@ -190,6 +230,7 @@ describe('Patient Endpoints', () => {
 
       expect(response.body).toHaveProperty('patients');
       expect(Array.isArray(response.body.patients)).toBe(true);
+      expect(response.body.patients.length).toBe(1); // Should see 1 patient from same org
     });
 
     it('should reject listing patients as PATIENT (forbidden)', async () => {
@@ -218,8 +259,18 @@ describe('Patient Endpoints', () => {
 
   describe('GET /api/patients/:id - Get Patient by ID', () => {
     it('should get patient by ID as ADMIN', async () => {
-      const admin = await createTestUser(Role.ADMIN);
-      const { patient } = await createCompleteTestPatient();
+      // Create shared organization
+      const org = await prisma.organization.create({
+        data: {
+          name: 'Test Clinic',
+          type: 'CLINIC',
+          status: 'ACTIVE',
+          tier: 'TRIAL'
+        }
+      });
+
+      const admin = await createTestUser(Role.ADMIN, false, org.id);
+      const { patient } = await createCompleteTestPatient('Test123!@#', org.id);
 
       const response = await request(app)
         .get(`/api/patients/${patient.id}`)
@@ -242,8 +293,18 @@ describe('Patient Endpoints', () => {
     });
 
     it('should get patient by ID as PRACTITIONER', async () => {
-      const practitioner = await createTestUser(Role.PRACTITIONER);
-      const { patient } = await createCompleteTestPatient();
+      // Create shared organization
+      const org = await prisma.organization.create({
+        data: {
+          name: 'Test Clinic',
+          type: 'CLINIC',
+          status: 'ACTIVE',
+          tier: 'TRIAL'
+        }
+      });
+
+      const practitioner = await createTestUser(Role.PRACTITIONER, false, org.id);
+      const { patient } = await createCompleteTestPatient('Test123!@#', org.id);
 
       const response = await request(app)
         .get(`/api/patients/${patient.id}`)
@@ -255,12 +316,11 @@ describe('Patient Endpoints', () => {
 
     it('should allow patient to view their own record', async () => {
       const { user, patient } = await createCompleteTestPatient();
-      const admin = await createTestUser(Role.ADMIN);
 
       // Generate token for the patient user
       const jwt = require('jsonwebtoken');
       const token = jwt.sign(
-        { userId: user.id, email: user.email, role: user.role },
+        { userId: user.id, email: user.email, role: user.role, organizationId: user.organizationId },
         process.env.JWT_SECRET || 'test-secret',
         { expiresIn: '1h' }
       );
@@ -300,8 +360,18 @@ describe('Patient Endpoints', () => {
 
   describe('PUT /api/patients/:id - Update Patient', () => {
     it('should update patient as ADMIN', async () => {
-      const admin = await createTestUser(Role.ADMIN);
-      const { patient } = await createCompleteTestPatient();
+      // Create shared organization
+      const org = await prisma.organization.create({
+        data: {
+          name: 'Test Clinic',
+          type: 'CLINIC',
+          status: 'ACTIVE',
+          tier: 'TRIAL'
+        }
+      });
+
+      const admin = await createTestUser(Role.ADMIN, false, org.id);
+      const { patient } = await createCompleteTestPatient('Test123!@#', org.id);
 
       const updates = {
         firstName: 'Updated',
@@ -371,8 +441,18 @@ describe('Patient Endpoints', () => {
 
   describe('DELETE /api/patients/:id - Delete Patient', () => {
     it('should delete patient as ADMIN', async () => {
-      const admin = await createTestUser(Role.ADMIN);
-      const { patient } = await createCompleteTestPatient();
+      // Create shared organization
+      const org = await prisma.organization.create({
+        data: {
+          name: 'Test Clinic',
+          type: 'CLINIC',
+          status: 'ACTIVE',
+          tier: 'TRIAL'
+        }
+      });
+
+      const admin = await createTestUser(Role.ADMIN, false, org.id);
+      const { patient } = await createCompleteTestPatient('Test123!@#', org.id);
 
       await request(app)
         .delete(`/api/patients/${patient.id}`)
@@ -436,8 +516,18 @@ describe('Patient Endpoints', () => {
 
   describe('HIPAA Compliance - Audit Logging', () => {
     it('should log all PHI access attempts', async () => {
-      const admin = await createTestUser(Role.ADMIN);
-      const { patient } = await createCompleteTestPatient();
+      // Create shared organization
+      const org = await prisma.organization.create({
+        data: {
+          name: 'Test Clinic',
+          type: 'CLINIC',
+          status: 'ACTIVE',
+          tier: 'TRIAL'
+        }
+      });
+
+      const admin = await createTestUser(Role.ADMIN, false, org.id);
+      const { patient } = await createCompleteTestPatient('Test123!@#', org.id);
 
       // Perform multiple operations
       await request(app)

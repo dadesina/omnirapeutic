@@ -9,26 +9,55 @@ export interface TestUser {
   email: string;
   password: string;
   role: Role;
+  organizationId: string | null;
+  isSuperAdmin: boolean;
   token: string;
   user: {
     userId: string;
     email: string;
     role: Role;
+    organizationId: string | null;
+    isSuperAdmin: boolean;
   };
 }
 
 /**
  * Create a test user with hashed password and JWT token
+ * Creates a test organization by default unless isSuperAdmin is true or organizationId is provided
  */
-export async function createTestUser(role: Role = Role.PATIENT): Promise<TestUser> {
+export async function createTestUser(
+  role: Role = Role.PATIENT,
+  isSuperAdmin: boolean = false,
+  existingOrganizationId?: string
+): Promise<TestUser> {
   const password = 'Test123!@#';
   const hashedPassword = await bcrypt.hash(password, 10);
+
+  // Create organization for non-super-admin users (unless one is provided)
+  let organizationId: string | null = null;
+  if (!isSuperAdmin) {
+    if (existingOrganizationId) {
+      organizationId = existingOrganizationId;
+    } else {
+      const organization = await prisma.organization.create({
+        data: {
+          name: `Test Clinic ${faker.string.alphanumeric(8)}`,
+          type: 'CLINIC',
+          status: 'ACTIVE',
+          tier: 'TRIAL'
+        }
+      });
+      organizationId = organization.id;
+    }
+  }
 
   const user = await prisma.user.create({
     data: {
       email: faker.internet.email().toLowerCase(),
       password: hashedPassword,
       role,
+      organizationId,
+      isSuperAdmin
     },
   });
 
@@ -36,7 +65,13 @@ export async function createTestUser(role: Role = Role.PATIENT): Promise<TestUse
   const jwtExpiresIn: string = process.env.JWT_EXPIRES_IN || '1h';
 
   const token = jwt.sign(
-    { userId: user.id, email: user.email, role: user.role },
+    {
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+      organizationId: user.organizationId,
+      isSuperAdmin: user.isSuperAdmin
+    },
     jwtSecret as jwt.Secret,
     { expiresIn: jwtExpiresIn } as jwt.SignOptions
   );
@@ -46,12 +81,29 @@ export async function createTestUser(role: Role = Role.PATIENT): Promise<TestUse
     email: user.email,
     password, // Return unhashed password for login tests
     role: user.role,
+    organizationId: user.organizationId,
+    isSuperAdmin: user.isSuperAdmin,
     token,
     user: {
       userId: user.id,
       email: user.email,
       role: user.role,
+      organizationId: user.organizationId,
+      isSuperAdmin: user.isSuperAdmin
     },
+  };
+}
+
+/**
+ * Convert a raw User object to JwtPayload format
+ */
+export function userToJwtPayload(user: any): any {
+  return {
+    userId: user.id,
+    email: user.email,
+    role: user.role,
+    organizationId: user.organizationId,
+    isSuperAdmin: user.isSuperAdmin,
   };
 }
 
@@ -69,10 +121,16 @@ export async function createTestUsers(count: number, role?: Role): Promise<TestU
 /**
  * Generate a valid JWT token for testing
  */
-export function generateTestToken(userId: string, email: string, role: Role): string {
+export function generateTestToken(
+  userId: string,
+  email: string,
+  role: Role,
+  organizationId: string | null = 'test-org-id',
+  isSuperAdmin: boolean = false
+): string {
   const jwtSecret: string = process.env.JWT_SECRET || 'test-secret';
   return jwt.sign(
-    { userId, email, role },
+    { userId, email, role, organizationId, isSuperAdmin },
     jwtSecret as jwt.Secret,
     { expiresIn: '1h' } as jwt.SignOptions
   );
@@ -81,10 +139,16 @@ export function generateTestToken(userId: string, email: string, role: Role): st
 /**
  * Generate an invalid/expired JWT token for testing
  */
-export function generateExpiredToken(userId: string, email: string, role: Role): string {
+export function generateExpiredToken(
+  userId: string,
+  email: string,
+  role: Role,
+  organizationId: string | null = 'test-org-id',
+  isSuperAdmin: boolean = false
+): string {
   const jwtSecret: string = process.env.JWT_SECRET || 'test-secret';
   return jwt.sign(
-    { userId, email, role },
+    { userId, email, role, organizationId, isSuperAdmin },
     jwtSecret as jwt.Secret,
     { expiresIn: '0s' } as jwt.SignOptions
   );
@@ -93,9 +157,15 @@ export function generateExpiredToken(userId: string, email: string, role: Role):
 /**
  * Generate a token with invalid signature
  */
-export function generateInvalidToken(userId: string, email: string, role: Role): string {
+export function generateInvalidToken(
+  userId: string,
+  email: string,
+  role: Role,
+  organizationId: string | null = 'test-org-id',
+  isSuperAdmin: boolean = false
+): string {
   return jwt.sign(
-    { userId, email, role },
+    { userId, email, role, organizationId, isSuperAdmin },
     'wrong-secret',
     { expiresIn: '1h' }
   );

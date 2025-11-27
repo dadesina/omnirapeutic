@@ -16,7 +16,12 @@ const client_1 = require("@prisma/client");
 const database_1 = __importDefault(require("../config/database"));
 const validation_1 = require("../utils/validation");
 // JWT Configuration
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-key-replace-in-production';
+// Fail fast if JWT_SECRET is not set in non-test environments
+const rawSecret = process.env.JWT_SECRET;
+if (!rawSecret && process.env.NODE_ENV !== 'test') {
+    throw new Error('SECURITY ERROR: JWT_SECRET must be set in environment variables');
+}
+const JWT_SECRET = rawSecret || 'test-secret-only-for-automated-tests';
 const JWT_EXPIRY = process.env.JWT_EXPIRY || '15m';
 const BCRYPT_ROUNDS = 10;
 /**
@@ -34,13 +39,15 @@ const comparePassword = async (password, hash) => {
 };
 exports.comparePassword = comparePassword;
 /**
- * Generate JWT token
+ * Generate JWT token with organization context
  */
-const generateToken = (userId, email, role) => {
+const generateToken = (userId, email, role, organizationId, isSuperAdmin) => {
     const payload = {
         userId,
         email,
-        role
+        role,
+        organizationId,
+        isSuperAdmin
     };
     return jsonwebtoken_1.default.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY });
 };
@@ -93,11 +100,15 @@ const register = async (email, password, role = client_1.Role.PATIENT) => {
         data: {
             email: email.toLowerCase(),
             password: hashedPassword,
-            role
+            role,
+            // organizationId and isSuperAdmin will be set later by admin
+            // or during organization creation flow
+            organizationId: null,
+            isSuperAdmin: false
         }
     });
-    // Generate token
-    const token = (0, exports.generateToken)(user.id, user.email, user.role);
+    // Generate token with organization context
+    const token = (0, exports.generateToken)(user.id, user.email, user.role, user.organizationId, user.isSuperAdmin);
     // Return user (without password) and token
     const { password: _, ...userResponse } = user;
     return {
@@ -122,8 +133,8 @@ const login = async (email, password) => {
     if (!isPasswordValid) {
         throw new Error('Invalid credentials');
     }
-    // Generate token
-    const token = (0, exports.generateToken)(user.id, user.email, user.role);
+    // Generate token with organization context
+    const token = (0, exports.generateToken)(user.id, user.email, user.role, user.organizationId, user.isSuperAdmin);
     // Return user (without password) and token
     const { password: _, ...userResponse } = user;
     return {
@@ -156,6 +167,6 @@ const refreshToken = async (userId) => {
     if (!user) {
         throw new Error('User not found');
     }
-    return (0, exports.generateToken)(user.id, user.email, user.role);
+    return (0, exports.generateToken)(user.id, user.email, user.role, user.organizationId, user.isSuperAdmin);
 };
 exports.refreshToken = refreshToken;

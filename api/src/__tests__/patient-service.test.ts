@@ -20,7 +20,7 @@ describe('Patient Service', () => {
   describe('createPatient', () => {
     it('should reject creation with future date of birth', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const user = await createTestUser(Role.PATIENT);
+      const user = await createTestUser(Role.PATIENT, false, admin.organizationId!);
 
       const futureDate = new Date();
       futureDate.setFullYear(futureDate.getFullYear() + 1);
@@ -29,6 +29,7 @@ describe('Patient Service', () => {
         createPatient(
           {
             userId: user.id,
+            organizationId: admin.organizationId!,
             firstName: 'Test',
             lastName: 'Patient',
             dateOfBirth: futureDate,
@@ -41,12 +42,13 @@ describe('Patient Service', () => {
 
     it('should reject creation by non-admin users', async () => {
       const practitioner = await createTestUser(Role.PRACTITIONER);
-      const user = await createTestUser(Role.PATIENT);
+      const user = await createTestUser(Role.PATIENT, false, practitioner.organizationId!);
 
       await expect(
         createPatient(
           {
             userId: user.id,
+            organizationId: practitioner.organizationId!,
             firstName: 'Test',
             lastName: 'Patient',
             dateOfBirth: new Date('1990-01-01'),
@@ -70,13 +72,14 @@ describe('Patient Service', () => {
     it('should support search filtering', async () => {
       const admin = await createTestUser(Role.ADMIN);
 
-      // Create test patients
-      const user1 = await createTestUser(Role.PATIENT);
-      const user2 = await createTestUser(Role.PATIENT);
+      // Create test patients in same org
+      const user1 = await createTestUser(Role.PATIENT, false, admin.organizationId!);
+      const user2 = await createTestUser(Role.PATIENT, false, admin.organizationId!);
 
       await createPatient(
         {
           userId: user1.id,
+          organizationId: admin.organizationId!,
           firstName: 'John',
           lastName: 'Smith',
           dateOfBirth: new Date('1980-01-01'),
@@ -88,6 +91,7 @@ describe('Patient Service', () => {
       await createPatient(
         {
           userId: user2.id,
+          organizationId: admin.organizationId!,
           firstName: 'Jane',
           lastName: 'Doe',
           dateOfBirth: new Date('1985-01-01'),
@@ -114,12 +118,13 @@ describe('Patient Service', () => {
 
     it('should reject access when patient views another patient record', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const patient1 = await createTestUser(Role.PATIENT);
-      const patient2 = await createTestUser(Role.PATIENT);
+      const patient1 = await createTestUser(Role.PATIENT, false, admin.organizationId!);
+      const patient2 = await createTestUser(Role.PATIENT, false, admin.organizationId!);
 
       const createdPatient = await createPatient(
         {
           userId: patient1.id,
+          organizationId: admin.organizationId!,
           firstName: 'Test',
           lastName: 'Patient',
           dateOfBirth: new Date('1990-01-01'),
@@ -149,11 +154,12 @@ describe('Patient Service', () => {
 
     it('should reject update with future date of birth', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const user = await createTestUser(Role.PATIENT);
+      const user = await createTestUser(Role.PATIENT, false, admin.organizationId!);
 
       const patient = await createPatient(
         {
           userId: user.id,
+          organizationId: admin.organizationId!,
           firstName: 'Test',
           lastName: 'Patient',
           dateOfBirth: new Date('1990-01-01'),
@@ -177,11 +183,12 @@ describe('Patient Service', () => {
     it('should reject update by non-admin users', async () => {
       const admin = await createTestUser(Role.ADMIN);
       const practitioner = await createTestUser(Role.PRACTITIONER);
-      const user = await createTestUser(Role.PATIENT);
+      const user = await createTestUser(Role.PATIENT, false, admin.organizationId!);
 
       const patient = await createPatient(
         {
           userId: user.id,
+          organizationId: admin.organizationId!,
           firstName: 'Test',
           lastName: 'Patient',
           dateOfBirth: new Date('1990-01-01'),
@@ -212,11 +219,12 @@ describe('Patient Service', () => {
     it('should reject deletion by non-admin users', async () => {
       const admin = await createTestUser(Role.ADMIN);
       const practitioner = await createTestUser(Role.PRACTITIONER);
-      const user = await createTestUser(Role.PATIENT);
+      const user = await createTestUser(Role.PATIENT, false, admin.organizationId!);
 
       const patient = await createPatient(
         {
           userId: user.id,
+          organizationId: admin.organizationId!,
           firstName: 'Test',
           lastName: 'Patient',
           dateOfBirth: new Date('1990-01-01'),
@@ -239,11 +247,12 @@ describe('Patient Service', () => {
 
     it('should return patient when exists', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const user = await createTestUser(Role.PATIENT);
+      const user = await createTestUser(Role.PATIENT, false, admin.organizationId!);
 
       await createPatient(
         {
           userId: user.id,
+          organizationId: admin.organizationId!,
           firstName: 'Test',
           lastName: 'Patient',
           dateOfBirth: new Date('1990-01-01'),

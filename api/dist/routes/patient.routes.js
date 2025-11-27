@@ -5,18 +5,18 @@
  * CRUD endpoints for Patient management with RBAC and audit logging
  * All PHI access is logged for HIPAA compliance
  */
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const client_1 = require("@prisma/client");
 const patient_service_1 = require("../services/patient.service");
 const auth_middleware_1 = require("../middleware/auth.middleware");
-const database_1 = __importDefault(require("../config/database"));
+const organization_scope_middleware_1 = require("../middleware/organization-scope.middleware");
+const btg_service_1 = require("../services/btg.service");
+const audit_service_1 = require("../services/audit.service");
 const router = (0, express_1.Router)();
-// All routes require authentication
+// All routes require authentication and organization scoping
 router.use(auth_middleware_1.authenticateToken);
+router.use(organization_scope_middleware_1.organizationScope);
 /**
  * POST /api/patients
  * Create a new patient (Admin only)
@@ -32,9 +32,22 @@ router.post('/', (0, auth_middleware_1.requireRole)([client_1.Role.ADMIN]), asyn
             });
             return;
         }
+        // Extract organizationId: Super Admins must provide it, regular admins use their own
+        const organizationId = req.user.isSuperAdmin
+            ? req.body.organizationId
+            : req.user.organizationId;
+        // Validate Super Admin provides explicit organizationId
+        if (req.user.isSuperAdmin && !req.body.organizationId) {
+            res.status(400).json({
+                error: 'Bad Request',
+                message: 'Super Admins must provide organizationId in request body'
+            });
+            return;
+        }
         // Create patient
         const patient = await (0, patient_service_1.createPatient)({
             userId,
+            organizationId,
             firstName,
             lastName,
             dateOfBirth,
@@ -42,16 +55,15 @@ router.post('/', (0, auth_middleware_1.requireRole)([client_1.Role.ADMIN]), asyn
             phoneNumber,
             address
         }, req.user);
-        // Audit log
-        await database_1.default.auditLog.create({
-            data: {
-                userId: req.user.userId,
-                action: 'CREATE',
-                resource: 'patients',
-                resourceId: patient.id,
-                details: { patientId: patient.id, medicalRecordNumber: patient.medicalRecordNumber },
-                ipAddress: req.ip
-            }
+        // Audit log with organization context
+        await (0, audit_service_1.logAuditEvent)({
+            userId: req.user.userId,
+            organizationId: patient.organizationId,
+            action: 'CREATE',
+            resource: 'patients',
+            resourceId: patient.id,
+            details: { patientId: patient.id, medicalRecordNumber: patient.medicalRecordNumber },
+            ipAddress: req.ip || '127.0.0.1',
         });
         res.status(201).json({ patient });
     }
@@ -64,7 +76,7 @@ router.post('/', (0, auth_middleware_1.requireRole)([client_1.Role.ADMIN]), asyn
         if (message.includes('already exists') || message.includes('Unique constraint')) {
             res.status(409).json({
                 error: 'Conflict',
-                message: 'Medical record number already exists'
+                message: 'Medical record number already exists in this organization'
             });
             return;
         }
@@ -89,15 +101,15 @@ router.get('/', (0, auth_middleware_1.requireRole)([client_1.Role.ADMIN, client_
         const limit = parseInt(req.query.limit) || 20;
         const search = req.query.search;
         const result = await (0, patient_service_1.getAllPatients)(req.user, { page, limit, search });
-        // Audit log - PHI access
-        await database_1.default.auditLog.create({
-            data: {
-                userId: req.user.userId,
-                action: 'READ',
-                resource: 'patients',
-                details: { action: 'list', page, limit, count: result.patients.length },
-                ipAddress: req.ip
-            }
+        // Audit log - PHI access with organization context
+        await (0, audit_service_1.logAuditEvent)({
+            userId: req.user.userId,
+            organizationId: req.user.organizationId,
+            action: 'READ',
+            resource: 'patients',
+            resourceId: null,
+            details: { action: 'list', page, limit, count: result.patients.length },
+            ipAddress: req.ip || '127.0.0.1',
         });
         res.status(200).json(result);
     }
@@ -116,22 +128,27 @@ router.get('/', (0, auth_middleware_1.requireRole)([client_1.Role.ADMIN, client_
 });
 /**
  * GET /api/patients/:id
- * Get patient by ID (Admin, Practitioner, or Owner)
+ * Get patient by ID (Admin, Practitioner, Owner, or BTG Grant)
  */
 router.get('/:id', async (req, res) => {
     try {
         const { id } = req.params;
         const patient = await (0, patient_service_1.getPatientById)(id, req.user);
-        // Audit log - PHI access
-        await database_1.default.auditLog.create({
-            data: {
-                userId: req.user.userId,
-                action: 'READ',
-                resource: 'patients',
-                resourceId: id,
-                details: { patientId: id, medicalRecordNumber: patient.medicalRecordNumber },
-                ipAddress: req.ip
-            }
+        // Check if access was granted via BTG
+        const usedBtgAccess = await (0, btg_service_1.hasActiveBtgAccess)(req.user.userId, id);
+        // Audit log - PHI access with organization context
+        await (0, audit_service_1.logAuditEvent)({
+            userId: req.user.userId,
+            organizationId: patient.organizationId,
+            action: usedBtgAccess ? 'BTG_USE_ACCESS' : 'READ',
+            resource: 'patients',
+            resourceId: id,
+            details: {
+                patientId: id,
+                medicalRecordNumber: patient.medicalRecordNumber,
+                accessMethod: usedBtgAccess ? 'break_the_glass' : 'standard_rbac',
+            },
+            ipAddress: req.ip || '127.0.0.1',
         });
         res.status(200).json({ patient });
     }
@@ -161,19 +178,18 @@ router.put('/:id', (0, auth_middleware_1.requireRole)([client_1.Role.ADMIN]), as
         const { id } = req.params;
         const { firstName, lastName, dateOfBirth, phoneNumber, address } = req.body;
         const patient = await (0, patient_service_1.updatePatient)(id, { firstName, lastName, dateOfBirth, phoneNumber, address }, req.user);
-        // Audit log - PHI modification
-        await database_1.default.auditLog.create({
-            data: {
-                userId: req.user.userId,
-                action: 'UPDATE',
-                resource: 'patients',
-                resourceId: id,
-                details: {
-                    patientId: id,
-                    changes: { firstName, lastName, dateOfBirth, phoneNumber, address }
-                },
-                ipAddress: req.ip
-            }
+        // Audit log - PHI modification with organization context
+        await (0, audit_service_1.logAuditEvent)({
+            userId: req.user.userId,
+            organizationId: patient.organizationId,
+            action: 'UPDATE',
+            resource: 'patients',
+            resourceId: id,
+            details: {
+                patientId: id,
+                changes: { firstName, lastName, dateOfBirth, phoneNumber, address },
+            },
+            ipAddress: req.ip || '127.0.0.1',
         });
         res.status(200).json({ patient });
     }
@@ -205,17 +221,18 @@ router.put('/:id', (0, auth_middleware_1.requireRole)([client_1.Role.ADMIN]), as
 router.delete('/:id', (0, auth_middleware_1.requireRole)([client_1.Role.ADMIN]), async (req, res) => {
     try {
         const { id } = req.params;
+        // Get patient first to capture organizationId before deletion
+        const patient = await (0, patient_service_1.getPatientById)(id, req.user);
         await (0, patient_service_1.deletePatient)(id, req.user);
-        // Audit log - PHI deletion
-        await database_1.default.auditLog.create({
-            data: {
-                userId: req.user.userId,
-                action: 'DELETE',
-                resource: 'patients',
-                resourceId: id,
-                details: { patientId: id },
-                ipAddress: req.ip
-            }
+        // Audit log - PHI deletion with organization context
+        await (0, audit_service_1.logAuditEvent)({
+            userId: req.user.userId,
+            organizationId: patient.organizationId,
+            action: 'DELETE',
+            resource: 'patients',
+            resourceId: id,
+            details: { patientId: id },
+            ipAddress: req.ip || '127.0.0.1',
         });
         res.status(204).send();
     }

@@ -19,15 +19,41 @@ const createPractitioner = async (data, requestingUser) => {
     if (requestingUser.role !== client_1.Role.ADMIN) {
         throw new Error('Forbidden: Only administrators can create practitioners');
     }
+    // Organization scoping: Regular admins can only create practitioners in their org
+    if (!requestingUser.isSuperAdmin && data.organizationId !== requestingUser.organizationId) {
+        throw new Error('Forbidden: You can only create practitioners in your own organization');
+    }
+    // Validate that the user belongs to the same organization
+    const user = await database_1.default.user.findUnique({
+        where: { id: data.userId }
+    });
+    if (!user) {
+        throw new Error('User not found');
+    }
+    if (user.organizationId !== data.organizationId) {
+        throw new Error('User must belong to the same organization as the practitioner');
+    }
+    // Check for duplicate license number within the organization
+    const existingPractitioner = await database_1.default.practitioner.findFirst({
+        where: {
+            organizationId: data.organizationId,
+            licenseNumber: data.licenseNumber
+        }
+    });
+    if (existingPractitioner) {
+        throw new Error('License number already exists in this organization');
+    }
     // Create practitioner
     const practitioner = await database_1.default.practitioner.create({
         data: {
             userId: data.userId,
+            organizationId: data.organizationId,
             firstName: data.firstName,
             lastName: data.lastName,
             licenseNumber: data.licenseNumber,
             specialization: data.specialization,
-            phoneNumber: data.phoneNumber
+            phoneNumber: data.phoneNumber,
+            credentials: data.credentials || []
         }
     });
     return practitioner;
@@ -56,6 +82,10 @@ const getAllPractitioners = async (requestingUser, filters = {}) => {
     if (filters.specialization) {
         where.specialization = { equals: filters.specialization, mode: 'insensitive' };
     }
+    // Organization scoping: Super Admins see all orgs, regular users see only their org
+    if (!requestingUser.isSuperAdmin) {
+        where.organizationId = requestingUser.organizationId;
+    }
     // Get practitioners with pagination
     const [practitioners, total] = await Promise.all([
         database_1.default.practitioner.findMany({
@@ -68,17 +98,21 @@ const getAllPractitioners = async (requestingUser, filters = {}) => {
     ]);
     return {
         practitioners,
-        total,
-        page,
-        limit
+        pagination: {
+            total,
+            page,
+            limit,
+            totalPages: Math.ceil(total / limit)
+        }
     };
 };
 exports.getAllPractitioners = getAllPractitioners;
 /**
  * Get practitioner by ID with RBAC
- * - Admin: can view any practitioner
- * - Practitioner: can view any practitioner (including own profile)
- * - Patient: can view practitioners (for finding care providers)
+ * - Super Admin: can view any practitioner in any organization
+ * - Admin: can view practitioners in their organization
+ * - Practitioner: can view practitioners in their organization (including own profile)
+ * - Patient: can view practitioners in their organization (for finding care providers)
  */
 const getPractitionerById = async (practitionerId, requestingUser) => {
     const practitioner = await database_1.default.practitioner.findUnique({
@@ -87,13 +121,21 @@ const getPractitionerById = async (practitionerId, requestingUser) => {
     if (!practitioner) {
         throw new Error('Practitioner not found');
     }
-    // All authenticated users can view practitioner profiles
+    // Super Admins can access any practitioner
+    if (requestingUser.isSuperAdmin) {
+        return practitioner;
+    }
+    // Organization boundary check: Users can only view practitioners in their org
+    if (practitioner.organizationId !== requestingUser.organizationId) {
+        throw new Error('Forbidden: You can only view practitioners in your organization');
+    }
     return practitioner;
 };
 exports.getPractitionerById = getPractitionerById;
 /**
  * Update practitioner
- * - Admin: can update any practitioner
+ * - Super Admin: can update any practitioner in any organization
+ * - Admin: can update practitioners in their organization
  * - Practitioner: can update own profile only
  */
 const updatePractitioner = async (practitionerId, data, requestingUser) => {
@@ -104,11 +146,21 @@ const updatePractitioner = async (practitionerId, data, requestingUser) => {
     if (!existingPractitioner) {
         throw new Error('Practitioner not found');
     }
-    // RBAC: Admins can update any practitioner, practitioners can update own profile
+    // RBAC: Admins can update practitioners in their org, practitioners can update own profile
+    const isSuperAdmin = requestingUser.isSuperAdmin;
     const isAdmin = requestingUser.role === client_1.Role.ADMIN;
     const isOwner = existingPractitioner.userId === requestingUser.userId;
-    if (!isAdmin && !isOwner) {
-        throw new Error('Forbidden: You can only update your own practitioner profile');
+    const isSameOrg = existingPractitioner.organizationId === requestingUser.organizationId;
+    // Super Admins can update any practitioner
+    if (!isSuperAdmin) {
+        // Organization boundary check
+        if (!isSameOrg) {
+            throw new Error('Forbidden: You can only update practitioners in your organization');
+        }
+        // Role-based check within organization
+        if (!isAdmin && !isOwner) {
+            throw new Error('Forbidden: You can only update your own practitioner profile');
+        }
     }
     // Update practitioner
     const updatedPractitioner = await database_1.default.practitioner.update({
@@ -137,6 +189,10 @@ const deletePractitioner = async (practitionerId, requestingUser) => {
     });
     if (!practitioner) {
         throw new Error('Practitioner not found');
+    }
+    // Organization boundary check: Regular admins can only delete practitioners in their org
+    if (!requestingUser.isSuperAdmin && practitioner.organizationId !== requestingUser.organizationId) {
+        throw new Error('Forbidden: You can only delete practitioners in your organization');
     }
     // Delete practitioner
     await database_1.default.practitioner.delete({

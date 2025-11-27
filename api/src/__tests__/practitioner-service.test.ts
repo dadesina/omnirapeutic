@@ -26,6 +26,7 @@ describe('Practitioner Service', () => {
         createPractitioner(
           {
             userId: user.id,
+            organizationId: practitioner.organizationId!,
             firstName: 'Test',
             lastName: 'Doctor',
             licenseNumber: 'LIC-TEST123',
@@ -41,13 +42,14 @@ describe('Practitioner Service', () => {
     it('should support search filtering', async () => {
       const admin = await createTestUser(Role.ADMIN);
 
-      // Create test practitioners
-      const user1 = await createTestUser(Role.PRACTITIONER);
-      const user2 = await createTestUser(Role.PRACTITIONER);
+      // Create test practitioners in same org
+      const user1 = await createTestUser(Role.PRACTITIONER, false, admin.organizationId!);
+      const user2 = await createTestUser(Role.PRACTITIONER, false, admin.organizationId!);
 
       await createPractitioner(
         {
           userId: user1.id,
+          organizationId: admin.organizationId!,
           firstName: 'John',
           lastName: 'Smith',
           licenseNumber: 'LIC-JOHN123',
@@ -59,6 +61,7 @@ describe('Practitioner Service', () => {
       await createPractitioner(
         {
           userId: user2.id,
+          organizationId: admin.organizationId!,
           firstName: 'Jane',
           lastName: 'Doe',
           licenseNumber: 'LIC-JANE456',
@@ -110,11 +113,12 @@ describe('Practitioner Service', () => {
     it('should reject update by non-admin users', async () => {
       const admin = await createTestUser(Role.ADMIN);
       const practitioner = await createTestUser(Role.PRACTITIONER);
-      const user = await createTestUser(Role.PRACTITIONER);
+      const user = await createTestUser(Role.PRACTITIONER, false, admin.organizationId!);
 
       const created = await createPractitioner(
         {
           userId: user.id,
+          organizationId: admin.organizationId!,
           firstName: 'Test',
           lastName: 'Doctor',
           licenseNumber: 'LIC-NOUPDATE',
@@ -145,11 +149,12 @@ describe('Practitioner Service', () => {
     it('should reject deletion by non-admin users', async () => {
       const admin = await createTestUser(Role.ADMIN);
       const practitioner = await createTestUser(Role.PRACTITIONER);
-      const user = await createTestUser(Role.PRACTITIONER);
+      const user = await createTestUser(Role.PRACTITIONER, false, admin.organizationId!);
 
       const created = await createPractitioner(
         {
           userId: user.id,
+          organizationId: admin.organizationId!,
           firstName: 'Test',
           lastName: 'Doctor',
           licenseNumber: 'LIC-NODELETE',
@@ -172,11 +177,12 @@ describe('Practitioner Service', () => {
 
     it('should return practitioner when exists', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const user = await createTestUser(Role.PRACTITIONER);
+      const user = await createTestUser(Role.PRACTITIONER, false, admin.organizationId!);
 
       await createPractitioner(
         {
           userId: user.id,
+          organizationId: admin.organizationId!,
           firstName: 'Test',
           lastName: 'Doctor',
           licenseNumber: 'LIC-BYUSER123',

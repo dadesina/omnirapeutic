@@ -4,25 +4,24 @@
  *
  * CRUD endpoints for Practitioner management with RBAC and audit logging
  */
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const client_1 = require("@prisma/client");
 const practitioner_service_1 = require("../services/practitioner.service");
 const auth_middleware_1 = require("../middleware/auth.middleware");
-const database_1 = __importDefault(require("../config/database"));
+const organization_scope_middleware_1 = require("../middleware/organization-scope.middleware");
+const audit_service_1 = require("../services/audit.service");
 const router = (0, express_1.Router)();
-// All routes require authentication
+// All routes require authentication and organization scoping
 router.use(auth_middleware_1.authenticateToken);
+router.use(organization_scope_middleware_1.organizationScope);
 /**
  * POST /api/practitioners
  * Create a new practitioner (Admin only)
  */
 router.post('/', (0, auth_middleware_1.requireRole)([client_1.Role.ADMIN]), async (req, res) => {
     try {
-        const { userId, firstName, lastName, licenseNumber, specialization, phoneNumber } = req.body;
+        const { userId, firstName, lastName, licenseNumber, specialization, phoneNumber, credentials } = req.body;
         // Validate required fields
         if (!userId || !firstName || !lastName || !licenseNumber || !specialization) {
             res.status(400).json({
@@ -31,25 +30,38 @@ router.post('/', (0, auth_middleware_1.requireRole)([client_1.Role.ADMIN]), asyn
             });
             return;
         }
+        // Extract organizationId: Super Admins must provide it, regular admins use their own
+        const organizationId = req.user.isSuperAdmin
+            ? req.body.organizationId
+            : req.user.organizationId;
+        // Validate Super Admin provides explicit organizationId
+        if (req.user.isSuperAdmin && !req.body.organizationId) {
+            res.status(400).json({
+                error: 'Bad Request',
+                message: 'Super Admins must provide organizationId in request body'
+            });
+            return;
+        }
         // Create practitioner
         const practitioner = await (0, practitioner_service_1.createPractitioner)({
             userId,
+            organizationId,
             firstName,
             lastName,
             licenseNumber,
             specialization,
-            phoneNumber
+            phoneNumber,
+            credentials
         }, req.user);
-        // Audit log
-        await database_1.default.auditLog.create({
-            data: {
-                userId: req.user.userId,
-                action: 'CREATE',
-                resource: 'practitioners',
-                resourceId: practitioner.id,
-                details: { practitionerId: practitioner.id, licenseNumber: practitioner.licenseNumber },
-                ipAddress: req.ip
-            }
+        // Audit log with organization context
+        await (0, audit_service_1.logAuditEvent)({
+            userId: req.user.userId,
+            organizationId: practitioner.organizationId,
+            action: 'CREATE',
+            resource: 'practitioners',
+            resourceId: practitioner.id,
+            details: { practitionerId: practitioner.id, licenseNumber: practitioner.licenseNumber },
+            ipAddress: req.ip || '127.0.0.1'
         });
         res.status(201).json({ practitioner });
     }
@@ -62,7 +74,7 @@ router.post('/', (0, auth_middleware_1.requireRole)([client_1.Role.ADMIN]), asyn
         if (message.includes('already exists') || message.includes('Unique constraint')) {
             res.status(409).json({
                 error: 'Conflict',
-                message: 'License number already exists'
+                message: 'License number already exists in this organization'
             });
             return;
         }
@@ -84,15 +96,15 @@ router.get('/', (0, auth_middleware_1.requireRole)([client_1.Role.ADMIN, client_
         const search = req.query.search;
         const specialization = req.query.specialization;
         const result = await (0, practitioner_service_1.getAllPractitioners)(req.user, { page, limit, search, specialization });
-        // Audit log
-        await database_1.default.auditLog.create({
-            data: {
-                userId: req.user.userId,
-                action: 'READ',
-                resource: 'practitioners',
-                details: { action: 'list', page, limit, count: result.practitioners.length },
-                ipAddress: req.ip
-            }
+        // Audit log with organization context
+        await (0, audit_service_1.logAuditEvent)({
+            userId: req.user.userId,
+            organizationId: req.user.organizationId,
+            action: 'READ',
+            resource: 'practitioners',
+            resourceId: null,
+            details: { action: 'list', page, limit, count: result.practitioners.length },
+            ipAddress: req.ip || '127.0.0.1'
         });
         res.status(200).json(result);
     }
@@ -117,16 +129,15 @@ router.get('/:id', async (req, res) => {
     try {
         const { id } = req.params;
         const practitioner = await (0, practitioner_service_1.getPractitionerById)(id, req.user);
-        // Audit log
-        await database_1.default.auditLog.create({
-            data: {
-                userId: req.user.userId,
-                action: 'READ',
-                resource: 'practitioners',
-                resourceId: id,
-                details: { practitionerId: id, licenseNumber: practitioner.licenseNumber },
-                ipAddress: req.ip
-            }
+        // Audit log with organization context
+        await (0, audit_service_1.logAuditEvent)({
+            userId: req.user.userId,
+            organizationId: practitioner.organizationId,
+            action: 'READ',
+            resource: 'practitioners',
+            resourceId: id,
+            details: { practitionerId: id, licenseNumber: practitioner.licenseNumber },
+            ipAddress: req.ip || '127.0.0.1'
         });
         res.status(200).json({ practitioner });
     }
@@ -152,19 +163,18 @@ router.put('/:id', async (req, res) => {
         const { id } = req.params;
         const { firstName, lastName, specialization, phoneNumber } = req.body;
         const practitioner = await (0, practitioner_service_1.updatePractitioner)(id, { firstName, lastName, specialization, phoneNumber }, req.user);
-        // Audit log
-        await database_1.default.auditLog.create({
-            data: {
-                userId: req.user.userId,
-                action: 'UPDATE',
-                resource: 'practitioners',
-                resourceId: id,
-                details: {
-                    practitionerId: id,
-                    changes: { firstName, lastName, specialization, phoneNumber }
-                },
-                ipAddress: req.ip
-            }
+        // Audit log with organization context
+        await (0, audit_service_1.logAuditEvent)({
+            userId: req.user.userId,
+            organizationId: practitioner.organizationId,
+            action: 'UPDATE',
+            resource: 'practitioners',
+            resourceId: id,
+            details: {
+                practitionerId: id,
+                changes: { firstName, lastName, specialization, phoneNumber }
+            },
+            ipAddress: req.ip || '127.0.0.1'
         });
         res.status(200).json({ practitioner });
     }
@@ -192,17 +202,18 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', (0, auth_middleware_1.requireRole)([client_1.Role.ADMIN]), async (req, res) => {
     try {
         const { id } = req.params;
+        // Get practitioner first to capture organizationId before deletion
+        const practitioner = await (0, practitioner_service_1.getPractitionerById)(id, req.user);
         await (0, practitioner_service_1.deletePractitioner)(id, req.user);
-        // Audit log
-        await database_1.default.auditLog.create({
-            data: {
-                userId: req.user.userId,
-                action: 'DELETE',
-                resource: 'practitioners',
-                resourceId: id,
-                details: { practitionerId: id },
-                ipAddress: req.ip
-            }
+        // Audit log with organization context
+        await (0, audit_service_1.logAuditEvent)({
+            userId: req.user.userId,
+            organizationId: practitioner.organizationId,
+            action: 'DELETE',
+            resource: 'practitioners',
+            resourceId: id,
+            details: { practitionerId: id },
+            ipAddress: req.ip || '127.0.0.1'
         });
         res.status(204).send();
     }

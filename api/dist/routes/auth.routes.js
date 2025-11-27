@@ -50,7 +50,7 @@ router.post('/register', async (req, res) => {
                 resource: 'users',
                 resourceId: result.user.id,
                 details: { email: result.user.email, role: result.user.role },
-                ipAddress: req.ip
+                ipAddress: req.ip || '127.0.0.1'
             }
         });
         res.status(201).json(result);
@@ -104,11 +104,11 @@ router.post('/login', async (req, res) => {
         await database_1.default.auditLog.create({
             data: {
                 userId: result.user.id,
-                action: 'READ',
+                action: 'LOGIN',
                 resource: 'auth',
                 resourceId: result.user.id,
                 details: { action: 'login', email: result.user.email },
-                ipAddress: req.ip
+                ipAddress: req.ip || '127.0.0.1'
             }
         });
         res.status(200).json(result);
@@ -121,7 +121,7 @@ router.post('/login', async (req, res) => {
                 action: 'READ',
                 resource: 'auth',
                 details: { action: 'login_failed', email: req.body.email, error: message },
-                ipAddress: req.ip
+                ipAddress: req.ip || '127.0.0.1'
             }
         });
         if (message.includes('Invalid credentials')) {

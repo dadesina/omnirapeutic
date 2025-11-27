@@ -34,7 +34,7 @@ describe('Audit Logging - HIPAA Compliance', () => {
   describe('Audit Log Structure', () => {
     it('should have required audit log fields', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const { patient } = await createCompleteTestPatient();
+      const { patient } = await createCompleteTestPatient('Test123!@#', admin.organizationId!);
 
       await request(app)
         .get(`/api/patients/${patient.id}`)
@@ -61,7 +61,7 @@ describe('Audit Logging - HIPAA Compliance', () => {
 
     it('should record accurate timestamps', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const { patient } = await createCompleteTestPatient();
+      const { patient } = await createCompleteTestPatient('Test123!@#', admin.organizationId!);
 
       const beforeTime = new Date();
 
@@ -88,7 +88,7 @@ describe('Audit Logging - HIPAA Compliance', () => {
 
     it('should record IP addresses', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const { patient } = await createCompleteTestPatient();
+      const { patient } = await createCompleteTestPatient('Test123!@#', admin.organizationId!);
 
       await request(app)
         .get(`/api/patients/${patient.id}`)
@@ -112,7 +112,7 @@ describe('Audit Logging - HIPAA Compliance', () => {
   describe('Patient PHI Access Logging', () => {
     it('should log patient creation (CREATE)', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const patientUser = await createTestUser(Role.PATIENT);
+      const patientUser = await createTestUser(Role.PATIENT, false, admin.organizationId!);
 
       await request(app)
         .post('/api/patients')
@@ -141,7 +141,7 @@ describe('Audit Logging - HIPAA Compliance', () => {
 
     it('should log patient reading (READ)', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const { patient } = await createCompleteTestPatient();
+      const { patient } = await createCompleteTestPatient('Test123!@#', admin.organizationId!);
 
       await request(app)
         .get(`/api/patients/${patient.id}`)
@@ -162,7 +162,7 @@ describe('Audit Logging - HIPAA Compliance', () => {
 
     it('should log patient list access (READ)', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      await createCompleteTestPatient();
+      await createCompleteTestPatient('Test123!@#', admin.organizationId!);
 
       await request(app)
         .get('/api/patients')
@@ -181,7 +181,7 @@ describe('Audit Logging - HIPAA Compliance', () => {
 
     it('should log patient updates (UPDATE)', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const { patient } = await createCompleteTestPatient();
+      const { patient } = await createCompleteTestPatient('Test123!@#', admin.organizationId!);
 
       await request(app)
         .put(`/api/patients/${patient.id}`)
@@ -203,7 +203,7 @@ describe('Audit Logging - HIPAA Compliance', () => {
 
     it('should log patient deletion (DELETE)', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const { patient } = await createCompleteTestPatient();
+      const { patient } = await createCompleteTestPatient('Test123!@#', admin.organizationId!);
 
       await request(app)
         .delete(`/api/patients/${patient.id}`)
@@ -224,7 +224,7 @@ describe('Audit Logging - HIPAA Compliance', () => {
 
     it('should include medical record number in audit details', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const { patient } = await createCompleteTestPatient();
+      const { patient } = await createCompleteTestPatient('Test123!@#', admin.organizationId!);
 
       await request(app)
         .get(`/api/patients/${patient.id}`)
@@ -250,7 +250,7 @@ describe('Audit Logging - HIPAA Compliance', () => {
   describe('Practitioner Data Access Logging', () => {
     it('should log practitioner creation (CREATE)', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const practitionerUser = await createTestUser(Role.PRACTITIONER);
+      const practitionerUser = await createTestUser(Role.PRACTITIONER, false, admin.organizationId!);
 
       await request(app)
         .post('/api/practitioners')
@@ -279,7 +279,7 @@ describe('Audit Logging - HIPAA Compliance', () => {
 
     it('should log practitioner reading (READ)', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const { practitioner } = await createCompleteTestPractitioner();
+      const { practitioner } = await createCompleteTestPractitioner('Test123!@#', admin.organizationId!);
 
       await request(app)
         .get(`/api/practitioners/${practitioner.id}`)
@@ -300,7 +300,7 @@ describe('Audit Logging - HIPAA Compliance', () => {
 
     it('should log practitioner updates (UPDATE)', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const { practitioner } = await createCompleteTestPractitioner();
+      const { practitioner } = await createCompleteTestPractitioner('Test123!@#', admin.organizationId!);
 
       await request(app)
         .put(`/api/practitioners/${practitioner.id}`)
@@ -322,7 +322,7 @@ describe('Audit Logging - HIPAA Compliance', () => {
 
     it('should log practitioner deletion (DELETE)', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const { practitioner } = await createCompleteTestPractitioner();
+      const { practitioner } = await createCompleteTestPractitioner('Test123!@#', admin.organizationId!);
 
       await request(app)
         .delete(`/api/practitioners/${practitioner.id}`)
@@ -343,7 +343,7 @@ describe('Audit Logging - HIPAA Compliance', () => {
 
     it('should include license number in audit details', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const { practitioner } = await createCompleteTestPractitioner();
+      const { practitioner } = await createCompleteTestPractitioner('Test123!@#', admin.organizationId!);
 
       await request(app)
         .get(`/api/practitioners/${practitioner.id}`)
@@ -430,8 +430,8 @@ describe('Audit Logging - HIPAA Compliance', () => {
   describe('Multi-User Activity Tracking', () => {
     it('should track different users accessing the same resource', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const practitioner = await createTestUser(Role.PRACTITIONER);
-      const { patient } = await createCompleteTestPatient();
+      const practitioner = await createTestUser(Role.PRACTITIONER, false, admin.organizationId!);
+      const { patient } = await createCompleteTestPatient('Test123!@#', admin.organizationId!);
 
       // Admin accesses patient
       await request(app)
@@ -459,7 +459,7 @@ describe('Audit Logging - HIPAA Compliance', () => {
 
     it('should track chronological access history', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const { patient } = await createCompleteTestPatient();
+      const { patient } = await createCompleteTestPatient('Test123!@#', admin.organizationId!);
 
       // Multiple accesses
       await request(app)
@@ -505,7 +505,7 @@ describe('Audit Logging - HIPAA Compliance', () => {
   describe('Audit Log Retention and Immutability', () => {
     it('should not allow audit logs to be modified', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const { patient } = await createCompleteTestPatient();
+      const { patient } = await createCompleteTestPatient('Test123!@#', admin.organizationId!);
 
       await request(app)
         .get(`/api/patients/${patient.id}`)
@@ -532,7 +532,7 @@ describe('Audit Logging - HIPAA Compliance', () => {
 
     it('should not allow audit logs to be deleted', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const { patient } = await createCompleteTestPatient();
+      const { patient } = await createCompleteTestPatient('Test123!@#', admin.organizationId!);
 
       await request(app)
         .get(`/api/patients/${patient.id}`)
@@ -560,7 +560,7 @@ describe('Audit Logging - HIPAA Compliance', () => {
   describe('Audit Log Query and Retrieval', () => {
     it('should retrieve audit logs by user', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const { patient } = await createCompleteTestPatient();
+      const { patient } = await createCompleteTestPatient('Test123!@#', admin.organizationId!);
 
       await request(app)
         .get(`/api/patients/${patient.id}`)
@@ -579,7 +579,7 @@ describe('Audit Logging - HIPAA Compliance', () => {
 
     it('should retrieve audit logs by resource', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      await createCompleteTestPatient();
+      await createCompleteTestPatient('Test123!@#', admin.organizationId!);
 
       await request(app)
         .get('/api/patients')
@@ -598,7 +598,7 @@ describe('Audit Logging - HIPAA Compliance', () => {
 
     it('should retrieve audit logs by date range', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const { patient } = await createCompleteTestPatient();
+      const { patient } = await createCompleteTestPatient('Test123!@#', admin.organizationId!);
 
       const startTime = new Date();
 
@@ -627,7 +627,7 @@ describe('Audit Logging - HIPAA Compliance', () => {
 
     it('should retrieve audit logs by action type', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const { patient } = await createCompleteTestPatient();
+      const { patient } = await createCompleteTestPatient('Test123!@#', admin.organizationId!);
 
       await request(app)
         .get(`/api/patients/${patient.id}`)
@@ -649,7 +649,7 @@ describe('Audit Logging - HIPAA Compliance', () => {
       // HIPAA requires audit logs to be retained for at least 6 years
       // This test documents the requirement
       const admin = await createTestUser(Role.ADMIN);
-      const { patient } = await createCompleteTestPatient();
+      const { patient } = await createCompleteTestPatient('Test123!@#', admin.organizationId!);
 
       await request(app)
         .get(`/api/patients/${patient.id}`)
@@ -672,7 +672,7 @@ describe('Audit Logging - HIPAA Compliance', () => {
 
     it('should provide comprehensive audit information for security investigation', async () => {
       const admin = await createTestUser(Role.ADMIN);
-      const { patient } = await createCompleteTestPatient();
+      const { patient } = await createCompleteTestPatient('Test123!@#', admin.organizationId!);
 
       await request(app)
         .get(`/api/patients/${patient.id}`)

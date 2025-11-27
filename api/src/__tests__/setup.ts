@@ -59,9 +59,29 @@ afterEach(async () => {
   // Clean up all data between tests in correct order (respecting foreign keys)
   await prisma.auditLog.deleteMany({});
   await prisma.btgAccessGrant.deleteMany({});
+
+  // Clinical data (must be deleted before sessions and treatment plans)
+  await prisma.dataPoint.deleteMany({}); // Must delete before goals and progress notes
+  await prisma.progressNote.deleteMany({}); // Must delete before sessions and treatment plans
+  await prisma.sessionEvent.deleteMany({}); // Must delete before sessions
+  await prisma.session.deleteMany({}); // Must delete before appointments
+
+  // Goals (must delete before treatment plans)
+  await prisma.goal.deleteMany({}); // Must delete before treatment plans
+
+  // Treatment plans (must delete before patients and authorizations)
+  await prisma.treatmentPlan.deleteMany({}); // Must delete before patients
+
+  // Appointments and authorizations
+  await prisma.appointment.deleteMany({}); // Must delete before patients/practitioners
+  await prisma.authorization.deleteMany({}); // Must delete before patients
+
+  await prisma.serviceCode.deleteMany({}); // Must delete before organizations
+  await prisma.patientInsurance.deleteMany({}); // Must delete before patients
   await prisma.patient.deleteMany({});
   await prisma.practitioner.deleteMany({});
   await prisma.user.deleteMany({});
+  await prisma.organization.deleteMany({}); // Must be last due to foreign keys
 });
 
 // Teardown: Run after all tests

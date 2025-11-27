@@ -34,6 +34,8 @@ describe('BTG Service', () => {
         userId: admin1.user.id,
         email: admin1.user.email,
         role: Role.ADMIN,
+        organizationId: admin1.user.organizationId,
+        isSuperAdmin: false
       };
 
       const grantRequest = {
@@ -87,6 +89,8 @@ describe('BTG Service', () => {
         userId: practitioner.id,
         email: practitioner.email,
         role: Role.PRACTITIONER,
+        organizationId: practitioner.organizationId,
+        isSuperAdmin: false
       };
 
       const grantRequest = {
@@ -111,6 +115,8 @@ describe('BTG Service', () => {
         userId: admin.user.id,
         email: admin.user.email,
         role: Role.ADMIN,
+        organizationId: admin.user.organizationId,
+        isSuperAdmin: false
       };
 
       const grantRequest = {
@@ -135,6 +141,8 @@ describe('BTG Service', () => {
         userId: admin.user.id,
         email: admin.user.email,
         role: Role.ADMIN,
+        organizationId: admin.user.organizationId,
+        isSuperAdmin: false
       };
 
       const grantRequest = {
@@ -159,6 +167,8 @@ describe('BTG Service', () => {
         userId: admin.user.id,
         email: admin.user.email,
         role: Role.ADMIN,
+        organizationId: admin.user.organizationId,
+        isSuperAdmin: false
       };
 
       const grantRequest = {
@@ -183,6 +193,8 @@ describe('BTG Service', () => {
         userId: admin1.user.id,
         email: admin1.user.email,
         role: Role.ADMIN,
+        organizationId: admin1.user.organizationId,
+        isSuperAdmin: false
       };
 
       const grantRequest = {
@@ -208,6 +220,8 @@ describe('BTG Service', () => {
         userId: admin1.user.id,
         email: admin1.user.email,
         role: Role.ADMIN,
+        organizationId: admin1.user.organizationId,
+        isSuperAdmin: false
       };
 
       // Act & Assert
@@ -237,6 +251,8 @@ describe('BTG Service', () => {
         userId: admin1.user.id,
         email: admin1.user.email,
         role: Role.ADMIN,
+        organizationId: admin1.user.organizationId,
+        isSuperAdmin: false
       };
 
       const grantRequest = {
@@ -286,6 +302,8 @@ describe('BTG Service', () => {
         userId: admin.user.id,
         email: admin.user.email,
         role: Role.ADMIN,
+        organizationId: admin.user.organizationId,
+        isSuperAdmin: false
       };
 
       // Act & Assert
@@ -304,6 +322,8 @@ describe('BTG Service', () => {
         userId: admin1.user.id,
         email: admin1.user.email,
         role: Role.ADMIN,
+        organizationId: admin1.user.organizationId,
+        isSuperAdmin: false
       };
 
       const grantRequest = {
@@ -335,6 +355,8 @@ describe('BTG Service', () => {
         userId: admin1.user.id,
         email: admin1.user.email,
         role: Role.ADMIN,
+        organizationId: admin1.user.organizationId,
+        isSuperAdmin: false
       };
 
       // Create 2 active grants
@@ -380,6 +402,8 @@ describe('BTG Service', () => {
         userId: admin1.user.id,
         email: admin1.user.email,
         role: Role.ADMIN,
+        organizationId: admin1.user.organizationId,
+        isSuperAdmin: false
       };
 
       const grant = await createBtgGrant(
@@ -410,6 +434,8 @@ describe('BTG Service', () => {
         userId: patient.user.id,
         email: patient.user.email,
         role: Role.PATIENT,
+        organizationId: patient.user.organizationId,
+        isSuperAdmin: false
       };
 
       // Act & Assert
@@ -430,6 +456,8 @@ describe('BTG Service', () => {
         userId: admin1.user.id,
         email: admin1.user.email,
         role: Role.ADMIN,
+        organizationId: admin1.user.organizationId,
+        isSuperAdmin: false
       };
 
       await createBtgGrant(
@@ -472,6 +500,8 @@ describe('BTG Service', () => {
         userId: admin1.user.id,
         email: admin1.user.email,
         role: Role.ADMIN,
+        organizationId: admin1.user.organizationId,
+        isSuperAdmin: false
       };
 
       const grant = await createBtgGrant(
@@ -531,6 +561,8 @@ describe('BTG Service', () => {
         userId: admin1.user.id,
         email: admin1.user.email,
         role: Role.ADMIN,
+        organizationId: admin1.user.organizationId,
+        isSuperAdmin: false
       };
 
       // Create BTG grant
@@ -549,6 +581,8 @@ describe('BTG Service', () => {
         userId: admin2.user.id,
         email: admin2.user.email,
         role: Role.ADMIN,
+        organizationId: admin2.user.organizationId,
+        isSuperAdmin: false
       };
 
       // Act - admin2 should be able to access patient via BTG
@@ -560,21 +594,22 @@ describe('BTG Service', () => {
     });
 
     it('should deny patient access without BTG grant for non-owner ADMIN', async () => {
-      // Arrange - Create admin who is NOT the patient owner and has no BTG grant
-      // Note: ADMINs normally have broad access, but for this test we're checking
-      // that BTG properly extends access control
+      // Arrange - Create admin and patient in same organization
+      // Note: ADMINs have broad access within their organization
 
       const admin = await createCompleteTestAdmin();
-      const patient = await createCompleteTestPatient();
+      const patient = await createCompleteTestPatient('Test123!@#', admin.user.organizationId!);
 
       const requestingAdmin: JwtPayload = {
         userId: admin.user.id,
         email: admin.user.email,
         role: Role.ADMIN,
+        organizationId: admin.user.organizationId,
+        isSuperAdmin: false
       };
 
-      // Act - ADMIN should still be able to access (they have ADMIN role)
-      // This test verifies ADMINs have access even without BTG
+      // Act - ADMIN should be able to access patients in their organization
+      // This test verifies ADMINs have access within their org even without BTG
       const accessedPatient = await getPatientById(patient.patient.id, requestingAdmin);
 
       // Assert
