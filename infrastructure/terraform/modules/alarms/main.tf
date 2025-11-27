@@ -611,10 +611,6 @@ resource "aws_cloudwatch_log_metric_filter" "btg_grant_access" {
     namespace = "Custom/Security"
     value     = "1"
     unit      = "Count"
-
-    dimensions = {
-      Environment = var.environment
-    }
   }
 }
 
@@ -659,10 +655,6 @@ resource "aws_cloudwatch_log_metric_filter" "btg_use_access" {
     namespace = "Custom/Security"
     value     = "1"
     unit      = "Count"
-
-    dimensions = {
-      Environment = var.environment
-    }
   }
 }
 

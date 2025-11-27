@@ -37,10 +37,6 @@ resource "aws_ecs_task_definition" "api" {
       {
         name      = "JWT_SECRET"
         valueFrom = var.jwt_secret_arn
-      },
-      {
-        name      = "DATABASE_URL"
-        valueFrom = "arn:aws:secretsmanager:us-east-1:422475949365:secret:omnirapeutic/production/database-url-A5TEQA"
       }
     ]
 

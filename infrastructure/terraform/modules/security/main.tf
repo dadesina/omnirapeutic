@@ -123,9 +123,11 @@ resource "aws_kms_alias" "secrets" {
 }
 
 # Random password for Aurora master user
+# Aurora password restrictions: no '/', '@', '"', ' ' characters
 resource "random_password" "aurora_master" {
-  length  = 32
-  special = true
+  length           = 32
+  special          = true
+  override_special = "!#$%&*()-_=+[]{}:;<>,.?"
 }
 
 # Secrets Manager - Aurora Master Password

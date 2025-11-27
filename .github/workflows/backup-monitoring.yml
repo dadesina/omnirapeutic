@@ -1,0 +1,244 @@
+name: Backup & Disaster Recovery Monitoring
+
+on:
+  schedule:
+    # Run backup metrics collection daily at 6 AM UTC
+    - cron: '0 6 * * *'
+    # Run disaster recovery test on the 1st of each month at 2 AM UTC
+    - cron: '0 2 1 * *'
+
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Type of test to run'
+        required: true
+        type: choice
+        options:
+          - metrics
+          - disaster-recovery
+          - both
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  backup-metrics:
+    name: Publish Backup Metrics to CloudWatch
+    runs-on: ubuntu-latest
+    # Run for scheduled daily job or manual dispatch with 'metrics' or 'both'
+    if: |
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' &&
+       (github.event.inputs.test_type == 'metrics' || github.event.inputs.test_type == 'both'))
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::422475949365:role/GitHubActionsRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify AWS credentials
+        run: |
+          aws sts get-caller-identity
+          echo "✅ AWS credentials configured successfully"
+
+      - name: Check RDS cluster status
+        run: |
+          echo "Checking Aurora PostgreSQL cluster status..."
+          aws rds describe-db-clusters \
+            --db-cluster-identifier omnirapeutic-production \
+            --query 'DBClusters[0].[DBClusterIdentifier,Status,BackupRetentionPeriod]' \
+            --output table
+
+      - name: Publish backup metrics to CloudWatch
+        run: |
+          echo "Publishing backup metrics..."
+          cd infrastructure
+          ./scripts/publish_backup_metrics.sh
+
+      - name: Verify metrics published
+        run: |
+          echo "Verifying metrics in CloudWatch..."
+          aws cloudwatch get-metric-statistics \
+            --namespace Custom/RDS \
+            --metric-name BackupSnapshotAge \
+            --dimensions Name=DBClusterIdentifier,Value=omnirapeutic-production \
+            --start-time $(date -u -d '5 minutes ago' +%Y-%m-%dT%H:%M:%S) \
+            --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+            --period 60 \
+            --statistics Maximum \
+            --query 'Datapoints[0].Maximum' \
+            --output text
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Backup metrics collection failed"
+          echo "::error::Failed to publish backup metrics to CloudWatch"
+
+  disaster-recovery-test:
+    name: Disaster Recovery Test
+    runs-on: ubuntu-latest
+    # Only run on monthly schedule or manual dispatch with 'disaster-recovery' or 'both'
+    if: |
+      (github.event_name == 'schedule' && github.event.schedule == '0 2 1 * *') ||
+      (github.event_name == 'workflow_dispatch' &&
+       (github.event.inputs.test_type == 'disaster-recovery' || github.event.inputs.test_type == 'both'))
+
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write  # To create PR with test report
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::422475949365:role/GitHubActionsRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client jq
+
+      - name: Verify AWS credentials
+        run: |
+          aws sts get-caller-identity
+          echo "✅ AWS credentials configured successfully"
+
+      - name: Run disaster recovery test
+        id: dr_test
+        run: |
+          echo "🧪 Starting disaster recovery test..."
+          echo "⚠️  This test will create a temporary Aurora cluster and will take 15-30 minutes"
+
+          cd infrastructure
+          ./scripts/test_disaster_recovery.sh
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dr-test-report-${{ github.run_id }}
+          path: infrastructure/docs/tests/dr-test-*.md
+          retention-days: 90
+
+      - name: Extract test results
+        if: always()
+        id: test_results
+        run: |
+          LATEST_REPORT=$(ls -t infrastructure/docs/tests/dr-test-*.md | head -1)
+
+          if [ -f "$LATEST_REPORT" ]; then
+            echo "Test report found: $LATEST_REPORT"
+
+            # Extract summary
+            PASSED=$(grep "Passed:" "$LATEST_REPORT" | sed 's/.*Passed\*\*: //' || echo "0")
+            FAILED=$(grep "Failed:" "$LATEST_REPORT" | sed 's/.*Failed\*\*: //' || echo "0")
+            DURATION=$(grep "Duration:" "$LATEST_REPORT" | sed 's/.*Duration\*\*: //' || echo "unknown")
+
+            echo "passed=$PASSED" >> $GITHUB_OUTPUT
+            echo "failed=$FAILED" >> $GITHUB_OUTPUT
+            echo "duration=$DURATION" >> $GITHUB_OUTPUT
+            echo "report_path=$LATEST_REPORT" >> $GITHUB_OUTPUT
+          else
+            echo "No test report found"
+            echo "passed=0" >> $GITHUB_OUTPUT
+            echo "failed=1" >> $GITHUB_OUTPUT
+            echo "duration=unknown" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Comment test results on issue
+        if: always() && steps.test_results.outputs.report_path != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const reportPath = '${{ steps.test_results.outputs.report_path }}';
+            const reportContent = fs.readFileSync(reportPath, 'utf8');
+
+            const comment = `## 🔄 Disaster Recovery Test Results
+
+            **Status**: ${{ steps.dr_test.outcome == 'success' && '✅ PASSED' || '❌ FAILED' }}
+            **Passed Tests**: ${{ steps.test_results.outputs.passed }}
+            **Failed Tests**: ${{ steps.test_results.outputs.failed }}
+            **Duration**: ${{ steps.test_results.outputs.duration }}
+            **Run ID**: ${{ github.run_id }}
+
+            <details>
+            <summary>View Full Test Report</summary>
+
+            ${reportContent}
+
+            </details>
+
+            [View Workflow Run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            `;
+
+            // Find or create an issue for tracking DR tests
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: ['disaster-recovery', 'monitoring'],
+              state: 'open'
+            });
+
+            let issueNumber;
+            if (issues.data.length > 0) {
+              issueNumber = issues.data[0].number;
+            } else {
+              const newIssue = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: '📊 Disaster Recovery Test Tracking',
+                body: 'This issue tracks monthly disaster recovery test results.',
+                labels: ['disaster-recovery', 'monitoring', 'automated']
+              });
+              issueNumber = newIssue.data.number;
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: comment
+            });
+
+      - name: Update DR plan with test results
+        if: always() && steps.test_results.outputs.report_path != ''
+        run: |
+          echo "Updating B/DR plan with test results..."
+
+          REPORT_PATH="${{ steps.test_results.outputs.report_path }}"
+          DR_PLAN="infrastructure/docs/BACKUP_AND_DISASTER_RECOVERY_PLAN.md"
+
+          # Update "Last Performed" date in testing schedule table
+          CURRENT_DATE=$(date +%Y-%m-%d)
+          sed -i "s/Last Performed | TBD/Last Performed | $CURRENT_DATE/g" "$DR_PLAN" || true
+
+          echo "✅ DR plan updated with latest test date"
+
+      - name: Fail workflow if tests failed
+        if: steps.dr_test.outcome == 'failure'
+        run: |
+          echo "::error::Disaster recovery test failed - see report for details"
+          exit 1
+
+      - name: Notify on success
+        if: success()
+        run: |
+          echo "✅ Disaster recovery test completed successfully"
+          echo "Tests passed: ${{ steps.test_results.outputs.passed }}"
+          echo "Duration: ${{ steps.test_results.outputs.duration }}"

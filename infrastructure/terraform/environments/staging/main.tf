@@ -1,4 +1,4 @@
-# Production Environment Configuration
+# Staging Environment Configuration
 
 terraform {
   required_version = ">= 1.5.0"
@@ -15,17 +15,26 @@ terraform {
   }
 }
 
+locals {
+  environment = "staging"
+}
+
 provider "aws" {
   region = var.aws_region
 
   default_tags {
     tags = {
       Project     = var.project_name
-      Environment = "production"
+      Environment = local.environment
       ManagedBy   = "Terraform"
       HIPAA       = "true"
     }
   }
+}
+
+# Data source for staging secrets created by security module
+data "aws_secretsmanager_secret_version" "aurora_password" {
+  secret_id = "omnirapeutic/staging/aurora/master-password"
 }
 
 # VPC Module
@@ -33,9 +42,10 @@ module "vpc" {
   source = "../../modules/vpc"
 
   project_name       = var.project_name
-  environment        = "production"
+  environment        = local.environment
   vpc_cidr           = var.vpc_cidr
-  availability_zones = var.availability_zones
+  # Staging Change: Use 2 AZs for cost savings
+  availability_zones = slice(var.availability_zones, 0, 2)
 }
 
 # Security Module (KMS + Secrets)
@@ -43,28 +53,31 @@ module "security" {
   source = "../../modules/security"
 
   project_name = var.project_name
-  environment  = "production"
+  environment  = local.environment
 }
 
 # Aurora Module
 module "aurora" {
   source = "../../modules/aurora"
 
-  project_name              = var.project_name
-  environment               = "production"
-  vpc_id                    = module.vpc.vpc_id
-  private_data_subnet_ids   = module.vpc.private_data_subnet_ids
-  allowed_security_group_ids = []  # Will be updated after bastion is created
+  project_name               = var.project_name
+  environment                = local.environment
+  vpc_id                     = module.vpc.vpc_id
+  private_data_subnet_ids    = module.vpc.private_data_subnet_ids
+  allowed_security_group_ids = []
 
-  database_name           = var.aurora_database_name
-  master_username         = var.aurora_master_username
-  master_password         = module.security.aurora_master_password
-  engine_version          = "15.10"  # LTS version for stability
-  min_capacity            = var.aurora_min_capacity
-  max_capacity            = var.aurora_max_capacity
-  instance_count          = 1
-  kms_key_arn             = module.security.kms_aurora_key_arn
-  enable_deletion_protection = var.enable_deletion_protection
+  database_name   = var.aurora_database_name
+  master_username = var.aurora_master_username
+  # Staging Change: Use pre-existing secret fetched via data source
+  master_password = data.aws_secretsmanager_secret_version.aurora_password.secret_string
+  engine_version  = "15.10"
+  min_capacity    = var.aurora_min_capacity
+  # Staging Change: Reduce max capacity for cost savings
+  max_capacity = 4
+  instance_count = 1
+  kms_key_arn    = module.security.kms_aurora_key_arn
+  # Staging Change: Disable deletion protection
+  enable_deletion_protection = false
 
   depends_on = [module.security]
 }
@@ -74,11 +87,12 @@ module "bastion" {
   source = "../../modules/bastion"
 
   project_name          = var.project_name
-  environment           = "production"
+  environment           = local.environment
   vpc_id                = module.vpc.vpc_id
   vpc_cidr              = var.vpc_cidr
   subnet_id             = module.vpc.private_app_subnet_ids[0]
   aurora_endpoint       = module.aurora.cluster_endpoint
+  # Staging Change: Use security module output for full ARN with suffix
   aurora_secret_arn     = module.security.aurora_master_password_arn
   database_name         = var.aurora_database_name
   kms_key_arn           = module.security.kms_secrets_key_arn
@@ -103,7 +117,7 @@ module "ecr" {
   source = "../../modules/ecr"
 
   project_name     = var.project_name
-  environment      = "production"
+  environment      = local.environment
   repository_names = ["api", "web", "worker"]
   kms_key_arn      = module.security.kms_s3_key_arn
 }
@@ -112,38 +126,41 @@ module "ecr" {
 module "ecs" {
   source = "../../modules/ecs"
 
-  project_name        = var.project_name
-  environment         = "production"
-  vpc_id              = module.vpc.vpc_id
-  vpc_cidr            = var.vpc_cidr
-  service_names       = ["api", "web", "worker"]
-  secrets_arn_prefix  = "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:${var.project_name}/production"
-  kms_key_arn         = module.security.kms_secrets_key_arn
+  project_name  = var.project_name
+  environment   = local.environment
+  vpc_id        = module.vpc.vpc_id
+  vpc_cidr      = var.vpc_cidr
+  service_names = ["api", "web", "worker"]
+  # Staging Change: Update secrets ARN prefix to use 'staging'
+  secrets_arn_prefix = "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:${var.project_name}/${local.environment}"
+  kms_key_arn        = module.security.kms_secrets_key_arn
 }
 
 # ALB Module
 module "alb" {
   source = "../../modules/alb"
 
-  project_name               = var.project_name
-  environment                = "production"
-  vpc_id                     = module.vpc.vpc_id
-  public_subnet_ids          = module.vpc.public_subnet_ids
-  certificate_arn            = ""  # HTTP-only initially, add certificate later
-  kms_key_arn                = module.security.kms_s3_key_arn
-  enable_deletion_protection = var.enable_deletion_protection
+  project_name      = var.project_name
+  environment       = local.environment
+  vpc_id            = module.vpc.vpc_id
+  public_subnet_ids = module.vpc.public_subnet_ids
+  certificate_arn   = ""
+  kms_key_arn       = module.security.kms_s3_key_arn
+  # Staging Change: Disable deletion protection
+  enable_deletion_protection = false
 }
 
 # WAF Module
 module "waf" {
   source = "../../modules/waf"
 
-  project_name   = var.project_name
-  environment    = "production"
-  alb_arn        = module.alb.alb_arn
-  kms_key_arn    = module.security.kms_secrets_key_arn
-  rate_limit     = 2000
-  enable_logging = false  # Logging disabled due to ARN format issue
+  project_name = var.project_name
+  environment  = local.environment
+  alb_arn      = module.alb.alb_arn
+  kms_key_arn  = module.security.kms_secrets_key_arn
+  # Staging Change: Reduce rate limit for non-production traffic
+  rate_limit     = 500
+  enable_logging = false
 
   depends_on = [module.alb]
 }
@@ -178,7 +195,7 @@ module "cloudtrail" {
   source = "../../modules/cloudtrail"
 
   project_name          = var.project_name
-  environment           = "production"
+  environment           = local.environment
   kms_key_arn           = module.security.kms_secrets_key_arn
   is_organization_trail = false
 }
@@ -188,7 +205,7 @@ module "config" {
   source = "../../modules/config"
 
   project_name = var.project_name
-  environment  = "production"
+  environment  = local.environment
   kms_key_arn  = module.security.kms_secrets_key_arn
 }
 
@@ -197,7 +214,7 @@ module "guardduty" {
   source = "../../modules/guardduty"
 
   project_name                 = var.project_name
-  environment                  = "production"
+  environment                  = local.environment
   kms_key_arn                  = module.security.kms_secrets_key_arn
   enable_kubernetes_protection = false
   enable_malware_protection    = true
@@ -208,26 +225,29 @@ module "alarms" {
   source = "../../modules/alarms"
 
   project_name      = var.project_name
-  environment       = "production"
+  environment       = local.environment
   kms_key_arn       = module.security.kms_secrets_key_arn
   aurora_cluster_id = module.aurora.cluster_id
   nat_gateway_ids   = module.vpc.nat_gateway_ids
   vpc_id            = module.vpc.vpc_id
-  cost_threshold    = 1500
+  # Staging Change: Reduce cost threshold for alerts
+  cost_threshold = 500
 
   # ALB Monitoring
-  alb_arn_suffix            = module.alb.alb_arn != "" ? split("/", module.alb.alb_arn)[1] : ""
-  target_group_arn_suffix   = module.alb.default_target_group_arn != "" ? split(":", module.alb.default_target_group_arn)[5] : ""
+  alb_arn_suffix          = module.alb.alb_arn != "" ? split("/", module.alb.alb_arn)[1] : ""
+  target_group_arn_suffix = module.alb.default_target_group_arn != "" ? split(":", module.alb.default_target_group_arn)[5] : ""
 
   # ECS Monitoring
   ecs_cluster_name = module.ecs.cluster_name
-  ecs_service_name = "omnirapeutic-production-api"
+  # Staging Change: Update service name for monitoring
+  ecs_service_name = "${var.project_name}-${local.environment}-api"
 
   # WAF Monitoring
   waf_web_acl_name = module.waf.web_acl_name
 
   # API Log Group for BTG Alarms
-  api_log_group_name = "/ecs/omnirapeutic-production/api"
+  # Staging Change: Update log group name for monitoring
+  api_log_group_name = "/ecs/${var.project_name}-${local.environment}/api"
 
   depends_on = [module.aurora, module.vpc, module.alb, module.ecs, module.waf]
 }
@@ -237,7 +257,7 @@ module "api_service" {
   source = "../../modules/api_service"
 
   project_name            = var.project_name
-  environment             = "production"
+  environment             = local.environment
   aws_region              = var.aws_region
   vpc_id                  = module.vpc.vpc_id
   ecs_cluster_id          = module.ecs.cluster_id
@@ -246,12 +266,15 @@ module "api_service" {
   task_execution_role_arn = module.ecs.task_execution_role_arn
   task_role_arn           = module.ecs.task_role_arn
   ecr_repository_url      = module.ecr.repository_urls["api"]
-  image_tag               = "v2.1.3"
+  image_tag               = "staging"
   aurora_endpoint         = module.aurora.cluster_endpoint
-  db_password_secret_arn  = module.security.aurora_master_password_arn
-  jwt_secret_arn          = "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:omnirapeutic/production/jwt-secret-LFTAaH"
-  http_listener_arn       = module.alb.http_listener_arn
-  desired_count           = 2
+  # Staging Change: Use security module outputs for full ARNs with suffix
+  db_password_secret_arn = module.security.aurora_master_password_arn
+  # Staging Change: Use security module JWT secret ARN
+  jwt_secret_arn    = module.security.supabase_jwt_secret_arn
+  http_listener_arn = module.alb.http_listener_arn
+  # Staging Change: Reduce task count for cost savings
+  desired_count = 1
 
   depends_on = [module.ecs, module.alb, module.ecr]
 }
@@ -279,8 +302,8 @@ resource "aws_lb_listener" "https" {
   }
 
   tags = {
-    Name        = "${var.project_name}-production-https-listener"
-    Environment = "production"
+    Name        = "${var.project_name}-${local.environment}-https-listener"
+    Environment = local.environment
   }
 }
 
@@ -289,7 +312,7 @@ module "web_service" {
   source = "../../modules/web_service"
 
   project_name            = var.project_name
-  environment             = "production"
+  environment             = local.environment
   aws_region              = var.aws_region
   vpc_id                  = module.vpc.vpc_id
   ecs_cluster_id          = module.ecs.cluster_id
@@ -320,7 +343,7 @@ resource "aws_route53_record" "web_staging" {
 
   alias {
     name                   = module.alb.alb_dns_name
-    zone_id                = "Z35SXDOTRQ7X7K"  # ALB canonical hosted zone ID for us-east-1
+    zone_id                = "Z35SXDOTRQ7X7K"
     evaluate_target_health = true
   }
 }
@@ -333,7 +356,7 @@ resource "aws_route53_record" "api_staging" {
 
   alias {
     name                   = module.alb.alb_dns_name
-    zone_id                = "Z35SXDOTRQ7X7K"  # ALB canonical hosted zone ID for us-east-1
+    zone_id                = "Z35SXDOTRQ7X7K"
     evaluate_target_health = true
   }
 }
