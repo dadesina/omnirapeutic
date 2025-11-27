@@ -10,11 +10,13 @@ import { JwtPayload } from './auth.service';
 
 export interface CreatePractitionerData {
   userId: string;
+  organizationId: string;
   firstName: string;
   lastName: string;
   licenseNumber: string;
   specialization: string;
   phoneNumber?: string;
+  credentials?: string[];
 }
 
 export interface UpdatePractitionerData {
@@ -43,15 +45,47 @@ export const createPractitioner = async (
     throw new Error('Forbidden: Only administrators can create practitioners');
   }
 
+  // Organization scoping: Regular admins can only create practitioners in their org
+  if (!requestingUser.isSuperAdmin && data.organizationId !== requestingUser.organizationId) {
+    throw new Error('Forbidden: You can only create practitioners in your own organization');
+  }
+
+  // Validate that the user belongs to the same organization
+  const user = await prisma.user.findUnique({
+    where: { id: data.userId }
+  });
+
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  if (user.organizationId !== data.organizationId) {
+    throw new Error('User must belong to the same organization as the practitioner');
+  }
+
+  // Check for duplicate license number within the organization
+  const existingPractitioner = await prisma.practitioner.findFirst({
+    where: {
+      organizationId: data.organizationId,
+      licenseNumber: data.licenseNumber
+    }
+  });
+
+  if (existingPractitioner) {
+    throw new Error('License number already exists in this organization');
+  }
+
   // Create practitioner
   const practitioner = await prisma.practitioner.create({
     data: {
       userId: data.userId,
+      organizationId: data.organizationId,
       firstName: data.firstName,
       lastName: data.lastName,
       licenseNumber: data.licenseNumber,
       specialization: data.specialization,
-      phoneNumber: data.phoneNumber
+      phoneNumber: data.phoneNumber,
+      credentials: data.credentials || []
     }
   });
 
@@ -89,6 +123,11 @@ export const getAllPractitioners = async (
     where.specialization = { equals: filters.specialization, mode: 'insensitive' };
   }
 
+  // Organization scoping: Super Admins see all orgs, regular users see only their org
+  if (!requestingUser.isSuperAdmin) {
+    where.organizationId = requestingUser.organizationId;
+  }
+
   // Get practitioners with pagination
   const [practitioners, total] = await Promise.all([
     prisma.practitioner.findMany({
@@ -113,9 +152,10 @@ export const getAllPractitioners = async (
 
 /**
  * Get practitioner by ID with RBAC
- * - Admin: can view any practitioner
- * - Practitioner: can view any practitioner (including own profile)
- * - Patient: can view practitioners (for finding care providers)
+ * - Super Admin: can view any practitioner in any organization
+ * - Admin: can view practitioners in their organization
+ * - Practitioner: can view practitioners in their organization (including own profile)
+ * - Patient: can view practitioners in their organization (for finding care providers)
  */
 export const getPractitionerById = async (
   practitionerId: string,
@@ -129,13 +169,23 @@ export const getPractitionerById = async (
     throw new Error('Practitioner not found');
   }
 
-  // All authenticated users can view practitioner profiles
+  // Super Admins can access any practitioner
+  if (requestingUser.isSuperAdmin) {
+    return practitioner;
+  }
+
+  // Organization boundary check: Users can only view practitioners in their org
+  if (practitioner.organizationId !== requestingUser.organizationId) {
+    throw new Error('Forbidden: You can only view practitioners in your organization');
+  }
+
   return practitioner;
 };
 
 /**
  * Update practitioner
- * - Admin: can update any practitioner
+ * - Super Admin: can update any practitioner in any organization
+ * - Admin: can update practitioners in their organization
  * - Practitioner: can update own profile only
  */
 export const updatePractitioner = async (
@@ -152,12 +202,23 @@ export const updatePractitioner = async (
     throw new Error('Practitioner not found');
   }
 
-  // RBAC: Admins can update any practitioner, practitioners can update own profile
+  // RBAC: Admins can update practitioners in their org, practitioners can update own profile
+  const isSuperAdmin = requestingUser.isSuperAdmin;
   const isAdmin = requestingUser.role === Role.ADMIN;
   const isOwner = existingPractitioner.userId === requestingUser.userId;
+  const isSameOrg = existingPractitioner.organizationId === requestingUser.organizationId;
 
-  if (!isAdmin && !isOwner) {
-    throw new Error('Forbidden: You can only update your own practitioner profile');
+  // Super Admins can update any practitioner
+  if (!isSuperAdmin) {
+    // Organization boundary check
+    if (!isSameOrg) {
+      throw new Error('Forbidden: You can only update practitioners in your organization');
+    }
+
+    // Role-based check within organization
+    if (!isAdmin && !isOwner) {
+      throw new Error('Forbidden: You can only update your own practitioner profile');
+    }
   }
 
   // Update practitioner
@@ -193,6 +254,11 @@ export const deletePractitioner = async (
 
   if (!practitioner) {
     throw new Error('Practitioner not found');
+  }
+
+  // Organization boundary check: Regular admins can only delete practitioners in their org
+  if (!requestingUser.isSuperAdmin && practitioner.organizationId !== requestingUser.organizationId) {
+    throw new Error('Forbidden: You can only delete practitioners in your organization');
   }
 
   // Delete practitioner

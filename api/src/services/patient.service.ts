@@ -12,6 +12,7 @@ import { hasActiveBtgAccess } from './btg.service';
 
 export interface CreatePatientData {
   userId: string;
+  organizationId: string;
   firstName: string;
   lastName: string;
   dateOfBirth: Date;
@@ -46,15 +47,47 @@ export const createPatient = async (
     throw new Error('Forbidden: Only administrators can create patients');
   }
 
+  // Organization scoping: Regular admins can only create patients in their org
+  // Super Admins must explicitly provide organizationId
+  if (!requestingUser.isSuperAdmin && data.organizationId !== requestingUser.organizationId) {
+    throw new Error('Forbidden: You can only create patients in your own organization');
+  }
+
   // Validate date of birth is in the past
   if (new Date(data.dateOfBirth) > new Date()) {
     throw new Error('Date of birth must be in the past');
+  }
+
+  // Validate that the user belongs to the same organization
+  const user = await prisma.user.findUnique({
+    where: { id: data.userId }
+  });
+
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  if (user.organizationId !== data.organizationId) {
+    throw new Error('User must belong to the same organization as the patient');
+  }
+
+  // Check for duplicate MRN within the organization
+  const existingPatient = await prisma.patient.findFirst({
+    where: {
+      organizationId: data.organizationId,
+      medicalRecordNumber: data.medicalRecordNumber
+    }
+  });
+
+  if (existingPatient) {
+    throw new Error('Medical record number already exists in this organization');
   }
 
   // Create patient
   const patient = await prisma.patient.create({
     data: {
       userId: data.userId,
+      organizationId: data.organizationId,
       firstName: data.firstName,
       lastName: data.lastName,
       dateOfBirth: new Date(data.dateOfBirth),
@@ -84,7 +117,7 @@ export const getAllPatients = async (
   const skip = (page - 1) * limit;
 
   // Build where clause for search
-  const where = filters.search
+  const searchWhere = filters.search
     ? {
         OR: [
           { firstName: { contains: filters.search, mode: 'insensitive' as const } },
@@ -93,6 +126,12 @@ export const getAllPatients = async (
         ]
       }
     : {};
+
+  // Organization scoping: Super Admins see all orgs, regular users see only their org
+  const where: any = { ...searchWhere };
+  if (!requestingUser.isSuperAdmin) {
+    where.organizationId = requestingUser.organizationId;
+  }
 
   // Get patients with pagination
   const [patients, total] = await Promise.all([
@@ -118,8 +157,9 @@ export const getAllPatients = async (
 
 /**
  * Get patient by ID with RBAC
- * - Admin: can view any patient
- * - Practitioner: can view any patient
+ * - Super Admin: can view any patient in any organization
+ * - Admin: can view patients in their organization
+ * - Practitioner: can view patients in their organization
  * - Patient: can only view own record
  * - BTG Grant: ADMIN with active Break-the-Glass grant can view patient
  */
@@ -136,13 +176,26 @@ export const getPatientById = async (
   }
 
   // RBAC: Check permissions
+  const isSuperAdmin = requestingUser.isSuperAdmin;
   const isAdmin = requestingUser.role === Role.ADMIN;
   const isPractitioner = requestingUser.role === Role.PRACTITIONER;
   const isOwner = patient.userId === requestingUser.userId;
+  const isSameOrg = patient.organizationId === requestingUser.organizationId;
 
   // BTG: Check for active Break-the-Glass emergency access grant
   const hasEmergencyAccess = await hasActiveBtgAccess(requestingUser.userId, patientId);
 
+  // Super Admins can access any patient
+  if (isSuperAdmin) {
+    return patient;
+  }
+
+  // Organization boundary check: Users can only access patients in their org
+  if (!isSameOrg && !hasEmergencyAccess) {
+    throw new Error('Forbidden: You can only access patients in your organization');
+  }
+
+  // Role-based checks within organization
   if (!isAdmin && !isPractitioner && !isOwner && !hasEmergencyAccess) {
     throw new Error('Forbidden: You can only view your own patient record');
   }
@@ -170,6 +223,11 @@ export const updatePatient = async (
 
   if (!existingPatient) {
     throw new Error('Patient not found');
+  }
+
+  // Organization boundary check: Regular admins can only update patients in their org
+  if (!requestingUser.isSuperAdmin && existingPatient.organizationId !== requestingUser.organizationId) {
+    throw new Error('Forbidden: You can only update patients in your organization');
   }
 
   // Validate date of birth if provided
@@ -211,6 +269,11 @@ export const deletePatient = async (
 
   if (!patient) {
     throw new Error('Patient not found');
+  }
+
+  // Organization boundary check: Regular admins can only delete patients in their org
+  if (!requestingUser.isSuperAdmin && patient.organizationId !== requestingUser.organizationId) {
+    throw new Error('Forbidden: You can only delete patients in your organization');
   }
 
   // Delete patient (cascade will handle user deletion if configured)

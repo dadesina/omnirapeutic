@@ -12,6 +12,7 @@ import prisma from '../config/database';
 
 export interface AuditEventParams {
   userId: string | null;
+  organizationId?: string | null;
   action: string;
   resource: string;
   resourceId?: string | null;
@@ -28,6 +29,7 @@ export interface AuditEventParams {
  * @example
  * await logAuditEvent({
  *   userId: 'user-uuid',
+ *   organizationId: 'org-uuid',
  *   action: 'READ',
  *   resource: 'patients',
  *   resourceId: 'patient-uuid',
@@ -40,6 +42,7 @@ export async function logAuditEvent(params: AuditEventParams): Promise<void> {
     await prisma.auditLog.create({
       data: {
         userId: params.userId,
+        organizationId: params.organizationId || null,
         action: params.action,
         resource: params.resource,
         resourceId: params.resourceId || null,
@@ -66,6 +69,7 @@ export async function logAuditEvents(events: AuditEventParams[]): Promise<void> 
     await prisma.auditLog.createMany({
       data: events.map((event) => ({
         userId: event.userId,
+        organizationId: event.organizationId || null,
         action: event.action,
         resource: event.resource,
         resourceId: event.resourceId || null,
