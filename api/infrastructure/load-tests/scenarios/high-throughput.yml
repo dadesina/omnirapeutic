@@ -1,0 +1,26 @@
+config:
+  target: "http://localhost:3000"
+  processor: "../helpers/auth.js"
+  phases:
+    - duration: 300
+      arrivalRate: 40
+      maxVusers: 200
+  ensure:
+    p95: 150
+    p99: 300
+  defaults:
+    headers:
+      Content-Type: application/json
+
+scenarios:
+  - name: "High Throughput Distributed Reserves"
+    flow:
+      - function: "setRandomAuthorization"
+      - function: "setRandomPractitionerToken"
+      - post:
+          url: "/api/authorizations/{{ authorizationId }}/reserve"
+          headers:
+            Authorization: "Bearer {{ practitionerToken }}"
+          json:
+            units: 5
+      - think: 0.25

@@ -1,0 +1,25 @@
+config:
+  target: "http://localhost:3000"
+  processor: "../helpers/auth.js"
+  phases:
+    - duration: 60
+      arrivalRate: 50
+      maxVusers: 50
+  ensure:
+    p95: 200
+    p99: 500
+  defaults:
+    headers:
+      Content-Type: application/json
+
+scenarios:
+  - name: "High Contention Reserve Storm"
+    flow:
+      - function: "setHighContentionAuthorization"
+      - function: "setRandomPractitionerToken"
+      - post:
+          url: "/api/authorizations/{{ authorizationId }}/reserve"
+          headers:
+            Authorization: "Bearer {{ practitionerToken }}"
+          json:
+            units: 10

@@ -1,0 +1,50 @@
+config:
+  target: "http://localhost:3000"
+  processor: "../helpers/auth.js"
+  phases:
+    - duration: 600
+      arrivalRate: 10
+      maxVusers: 100
+  ensure:
+    p95: 175
+  defaults:
+    headers:
+      Content-Type: application/json
+
+scenarios:
+  - weight: 70
+    name: "Reserve Operation"
+    flow:
+      - function: "setMixedAuthorizationContext"
+      - function: "setRandomPractitionerToken"
+      - post:
+          url: "/api/authorizations/{{ authorizationId }}/reserve"
+          headers:
+            Authorization: "Bearer {{ practitionerToken }}"
+          json:
+            units: 5
+      - think: 1
+  - weight: 20
+    name: "Release Operation"
+    flow:
+      - function: "setMixedAuthorizationContext"
+      - function: "setRandomPractitionerToken"
+      - post:
+          url: "/api/authorizations/{{ authorizationId }}/release"
+          headers:
+            Authorization: "Bearer {{ practitionerToken }}"
+          json:
+            units: 5
+      - think: 1
+  - weight: 10
+    name: "Consume Operation"
+    flow:
+      - function: "setMixedAuthorizationContext"
+      - function: "setRandomPractitionerToken"
+      - post:
+          url: "/api/authorizations/{{ authorizationId }}/consume"
+          headers:
+            Authorization: "Bearer {{ practitionerToken }}"
+          json:
+            units: 3
+      - think: 1

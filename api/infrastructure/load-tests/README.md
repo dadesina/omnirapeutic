@@ -1,0 +1,284 @@
+# Performance Load Testing
+
+Validates SERIALIZABLE transaction isolation under production-like load before implementing Session & Appointment Management.
+
+## Overview
+
+This test suite uses Artillery to simulate realistic clinic workflows and measure system performance under three scenarios:
+1. **High-Contention**: Race condition stress test (50 concurrent requests to same authorization)
+2. **High-Throughput**: Distributed operations across many authorizations (200 concurrent requests)
+3. **Mixed Operations**: Realistic workflow with reserve/release/consume mix (70/20/10 split)
+
+## Prerequisites
+
+- PostgreSQL running locally
+- Node.js and npm installed
+- API server built (`npm run build`)
+- Artillery installed (`npm install --save-dev artillery`)
+
+## Quick Start
+
+### 1. Setup Test Environment
+
+Create dedicated load test database and seed realistic test data:
+
+```bash
+npm run load-test:setup
+```
+
+This will:
+- Create `omnirapeutic_load_test` database
+- Run Prisma migrations
+- Seed 3 organizations, 20 patients, 55 authorizations, 10 practitioners
+- Generate `fixtures/test-data.json` with auth IDs and JWT tokens
+
+### 2. Start API Server
+
+In a **separate terminal**, start the server pointing to the load test database:
+
+```bash
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/omnirapeutic_load_test npm start
+```
+
+### 3. Run Load Tests
+
+#### Option A: Run All Scenarios
+
+```bash
+npm run load-test:all
+```
+
+This runs all 3 scenarios, generates HTML reports, and verifies database integrity.
+
+#### Option B: Run Individual Scenarios
+
+```bash
+# Scenario 1: High-Contention (~1 minute)
+npm run load-test:scenario1
+
+# Scenario 2: High-Throughput (~5 minutes)
+npm run load-test:scenario2
+
+# Scenario 3: Mixed Operations (~10 minutes)
+npm run load-test:scenario3
+```
+
+### 4. View Results
+
+Artillery generates JSON and HTML reports in `infrastructure/load-tests/`:
+
+```bash
+# Generate HTML reports from JSON
+npm run load-test:report
+
+# Open HTML reports in browser
+open infrastructure/load-tests/report-contention.json.html
+open infrastructure/load-tests/report-throughput.json.html
+open infrastructure/load-tests/report-mixed.json.html
+```
+
+### 5. Verify Database Integrity
+
+Check for overbooking (must return 0 rows):
+
+```bash
+npm run load-test:verify
+```
+
+**Expected Output:**
+```
+=== Authorization Unit Integrity Check ===
+(0 rows)
+
+=== Expected Result: 0 rows ===
+```
+
+If any rows are returned, SERIALIZABLE isolation failed!
+
+## Test Scenarios
+
+### Scenario 1: High-Contention
+
+**Purpose:** Validate SERIALIZABLE isolation prevents race conditions
+
+**Configuration:**
+- Duration: 60 seconds
+- Concurrency: 50 virtual users
+- Target: Single authorization with 50 available units
+- Operation: Reserve 10 units per request
+- Expected: 5 succeed (50 units consumed), 45 fail with 409 Conflict
+
+**Success Criteria:**
+- p95 latency < 200ms
+- p99 latency < 500ms
+- Zero overbooking in database
+
+### Scenario 2: High-Throughput
+
+**Purpose:** Validate performance under normal load with minimal contention
+
+**Configuration:**
+- Duration: 300 seconds (5 minutes)
+- Concurrency: Ramps to 200 virtual users
+- Target: 50+ different authorizations across 3 orgs
+- Operation: Reserve 5 units per request
+- Expected: Near-zero conflicts (different resources)
+
+**Success Criteria:**
+- p95 latency < 150ms
+- p99 latency < 300ms
+- Error rate < 2%
+- Sustained 100+ RPS
+
+### Scenario 3: Mixed Operations
+
+**Purpose:** Simulate realistic clinic workflow with occasional conflicts
+
+**Configuration:**
+- Duration: 600 seconds (10 minutes)
+- Concurrency: 100 virtual users
+- Target: 80% different authorizations, 20% same authorization
+- Operations:
+  - 70% Reserve (5 units)
+  - 20% Release (5 units)
+  - 10% Consume (3 units)
+- Expected: 10-20% conflicts (realistic contention)
+
+**Success Criteria:**
+- p95 latency < 175ms
+- Error rate 10-20% (expected conflicts)
+- Zero overbooking in database
+
+## Test Data
+
+Seeding script creates:
+
+**Organizations (3):**
+- OrgA: 10 patients, 4 practitioners, 30 authorizations
+- OrgB: 5 patients, 3 practitioners, 15 authorizations
+- OrgC: 5 patients, 3 practitioners, 10 authorizations
+
+**Authorizations (55):**
+- 10 with 50 units (high-contention targets)
+- 20 with 200 units (normal operations)
+- 25 with 1000 units (high-throughput targets)
+
+**Users:**
+- 10 Practitioners (JWT tokens generated for API calls)
+- 20 Patients (linked to authorizations)
+
+**Generated Fixture (fixtures/test-data.json):**
+```json
+{
+  "authorizationIds": ["uuid1", "uuid2", ...],
+  "highContentionAuthIds": ["uuid-with-50-units", ...],
+  "practitionerTokens": ["jwt1", "jwt2", ...]
+}
+```
+
+## Project Structure
+
+```
+infrastructure/load-tests/
+├── scenarios/
+│   ├── high-contention.yml         # Scenario 1
+│   ├── high-throughput.yml         # Scenario 2
+│   └── mixed-operations.yml        # Scenario 3
+├── fixtures/
+│   └── test-data.json              # Generated by seed script
+├── helpers/
+│   └── auth.js                     # JWT token & auth ID selection
+├── seed-test-data.ts               # Data seeding script
+├── verify-integrity.sql            # Overbooking check query
+├── README.md                       # This file
+└── report-*.json                   # Test results (gitignored)
+```
+
+## Metrics to Analyze
+
+For each scenario, review:
+
+1. **Latency Distribution:**
+   - p50 (median response time)
+   - p95 (95th percentile)
+   - p99 (99th percentile)
+   - Min/max response times
+
+2. **Error Rates:**
+   - Success rate (200-299 status codes)
+   - Conflict rate (409 status codes)
+   - Server errors (500+ status codes)
+
+3. **Throughput:**
+   - Requests per second (RPS)
+   - Sustained RPS over test duration
+
+4. **Database Integrity:**
+   - Zero rows in overbooking check
+   - No crashes or connection pool exhaustion
+
+## Success Definition
+
+**GO for Session & Appointment Management implementation if:**
+- All 3 scenarios pass their p95/p99 thresholds
+- Database integrity check returns 0 rows (no overbooking)
+- No server crashes or connection pool exhaustion
+
+**NO-GO (optimization required) if:**
+- Any scenario exceeds latency thresholds by >50%
+- Overbooking detected (SERIALIZABLE isolation failed)
+- Server crashes under load
+
+## Troubleshooting
+
+**Problem:** `Cannot create database "omnirapeutic_load_test" (already exists)`
+**Solution:** Drop and recreate:
+```bash
+dropdb omnirapeutic_load_test
+npm run load-test:setup
+```
+
+**Problem:** `Fixture test-data.json not found`
+**Solution:** Run seed script:
+```bash
+npm run load-test:seed
+```
+
+**Problem:** `Connection refused on port 3000`
+**Solution:** Start API server in separate terminal:
+```bash
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/omnirapeutic_load_test npm start
+```
+
+**Problem:** High error rates in Scenario 2 (should be <2%)
+**Solution:** Check connection pool limits in database config. May need to increase `max` pool size.
+
+**Problem:** Artillery reports "Error: ECONNREFUSED" or "Socket hang up"
+**Solution:** Server may be overwhelmed. Check:
+- Node.js heap memory usage
+- PostgreSQL connection pool exhaustion
+- System resource limits (ulimit)
+
+## Next Steps
+
+After completing performance testing:
+
+1. **Document Results:** Create `PERFORMANCE_TEST_RESULTS.md` with:
+   - Executive summary (PASS/FAIL)
+   - Detailed metrics for each scenario
+   - Database integrity verification results
+   - GO/NO-GO recommendation
+
+2. **If PASS:** Proceed with Session & Appointment Management implementation (Phase 3B)
+
+3. **If NO-GO:** Identify bottlenecks and optimize:
+   - Database connection pool tuning
+   - Query optimization
+   - Consider READ COMMITTED isolation (with application-level retry logic)
+   - Load balancing or horizontal scaling
+
+## References
+
+- Artillery Documentation: https://www.artillery.io/docs
+- PostgreSQL SERIALIZABLE Isolation: https://www.postgresql.org/docs/current/transaction-iso.html
+- Performance Testing Best Practices: https://www.artillery.io/docs/guides/guides/test-script-reference
