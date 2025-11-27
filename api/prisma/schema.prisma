@@ -1,5 +1,6 @@
 // Prisma Schema for Omnirapeutic Healthcare Platform
-// Defines data models for User management, Patient records, Practitioners, and Audit logs
+// Phase 2A: Multi-Tenant ABA Therapy Management System
+// Includes: Organizations, Insurance, Authorizations, Scheduling, Clinical Sessions
 
 generator client {
   provider = "prisma-client-js"
@@ -10,149 +11,846 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// User model - Core authentication and authorization
-model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String   // bcrypt hashed password
-  role      Role     @default(PATIENT)
+// ============================================================================
+// ORGANIZATION & MULTI-TENANCY
+// ============================================================================
+
+model Organization {
+  id   String  @id @default(uuid())
+  name String
+  type OrgType @default(CLINIC)
+
+  // Contact Information
+  email   String?
+  phone   String?
+  address String?
+
+  // Settings
+  settings Json? // Clinic-specific settings (timezone, business hours, etc.)
+
+  // Subscription
+  tier SubscriptionTier @default(TRIAL)
+
+  // Status
+  status OrgStatus @default(ACTIVE)
+
+  // Timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relations
-  patient                Patient?
-  practitioner           Practitioner?
-  auditLogs              AuditLog[]
+  users           User[]
+  patients        Patient[]
+  practitioners   Practitioner[]
+  serviceCodes    ServiceCode[]
+  billingCodes    BillingCode[]
+  insurance       PatientInsurance[]
+  authorizations  Authorization[]
+  appointments    Appointment[]
+  sessions        Session[]
+  auditLogs       AuditLog[]
+  treatmentPlans  TreatmentPlan[]
+  goals           Goal[]
+  progressNotes     ProgressNote[]
+  dataPoints        DataPoint[]
+  claims            Claim[]
+  claimSubmissions  ClaimSubmission[]
+
+  @@map("organizations")
+}
+
+enum OrgType {
+  CLINIC
+  HOSPITAL
+  PRIVATE_PRACTICE
+}
+
+enum OrgStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  TRIAL
+}
+
+enum SubscriptionTier {
+  TRIAL
+  BASIC
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+// ============================================================================
+// USER MANAGEMENT & AUTHENTICATION
+// ============================================================================
+
+model User {
+  id       String @id @default(uuid())
+  email    String @unique
+  password String // bcrypt hashed password
+  role     Role   @default(PATIENT)
+
+  // Multi-tenancy
+  organizationId String? // nullable for Super Admins
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  isSuperAdmin Boolean @default(false) // Platform-level admin
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  patient      Patient?
+  practitioner Practitioner?
+  auditLogs    AuditLog[]
 
   // Break-the-Glass relations
-  btgGrantsGiven         BtgAccessGrant[] @relation("BtgGrantedBy")   // Grants this user created
-  btgGrantsReceived      BtgAccessGrant[] @relation("BtgGrantedTo")   // Grants this user received
-  btgGrantsRevoked       BtgAccessGrant[] @relation("BtgRevokedBy")   // Grants this user revoked
+  btgGrantsGiven    BtgAccessGrant[] @relation("BtgGrantedBy")
+  btgGrantsReceived BtgAccessGrant[] @relation("BtgGrantedTo")
+  btgGrantsRevoked  BtgAccessGrant[] @relation("BtgRevokedBy")
+
+  // Treatment Plan relations
+  treatmentPlansCreated TreatmentPlan[] @relation("TreatmentPlanCreator")
+  progressNotesCreated  ProgressNote[]
 
   @@index([email])
+  @@index([organizationId])
   @@map("users")
 }
 
-// Role enumeration for RBAC
 enum Role {
   ADMIN
   PRACTITIONER
   PATIENT
 }
 
-// Practitioner model - Healthcare providers
+// ============================================================================
+// HEALTHCARE PROVIDERS
+// ============================================================================
+
 model Practitioner {
-  id             String   @id @default(uuid())
-  userId         String   @unique
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Multi-tenancy
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
 
   // Personal Information
-  firstName      String
-  lastName       String
+  firstName String
+  lastName  String
 
   // Professional Information
-  licenseNumber  String   @unique
+  licenseNumber  String // Unique per organization, not globally
   specialization String
   phoneNumber    String?
 
+  // Credentials (for service code validation)
+  credentials String[] // e.g., ["RBT", "BCBA", "BCaBA"]
+
   // Timestamps
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  appointments Appointment[]
+  sessions     Session[]
 
   @@index([userId])
-  @@index([licenseNumber])
+  @@index([organizationId])
+  @@index([organizationId, licenseNumber])
   @@map("practitioners")
 }
 
-// AuditLog model - HIPAA compliance audit trail
-model AuditLog {
-  id         String   @id @default(uuid())
-  userId     String?
-  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+// ============================================================================
+// PATIENTS
+// ============================================================================
 
-  // Audit Information
-  action     String   // CREATE, READ, UPDATE, DELETE
-  resource   String   // patients, practitioners, users, etc.
-  resourceId String?  // ID of the resource being accessed
-  details    Json?    // Additional context (field changes, search params, etc.)
-  ipAddress  String?  // Client IP address
+model Patient {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  // Timestamp
-  timestamp  DateTime @default(now())
+  // Multi-tenancy
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  // Personal Information
+  firstName   String
+  lastName    String
+  dateOfBirth DateTime
+
+  // Medical Information
+  medicalRecordNumber String // Unique per organization, not globally
+  phoneNumber         String?
+  address             String?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  btgAccessGrants BtgAccessGrant[]
+  insurance       PatientInsurance[]
+  authorizations  Authorization[]
+  appointments    Appointment[]
+  sessions        Session[]
+  treatmentPlans  TreatmentPlan[]
+  claims          Claim[]
 
   @@index([userId])
+  @@index([organizationId])
+  @@index([organizationId, medicalRecordNumber])
+  @@map("patients")
+}
+
+// ============================================================================
+// INSURANCE & BILLING
+// ============================================================================
+
+model PatientInsurance {
+  id             String       @id @default(uuid())
+  patientId      String
+  patient        Patient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  // Payer Information
+  payerName String // e.g., "United Healthcare", "Aetna"
+  payerId   String? // National Payer ID
+
+  // Member Information
+  memberNumber String
+  groupNumber  String?
+
+  // Coverage Dates
+  effectiveDate   DateTime
+  terminationDate DateTime?
+
+  // Status
+  isActive  Boolean @default(true)
+  isPrimary Boolean @default(true)
+
+  // Eligibility Verification
+  lastVerifiedAt          DateTime?
+  eligibilityVerification Json? // Stores verification details
+
+  // Additional Info
+  notes String?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  authorizations Authorization[]
+
+  @@index([patientId])
+  @@index([organizationId])
+  @@map("patient_insurance")
+}
+
+model Authorization {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  patientId String
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  insuranceId String?
+  insurance   PatientInsurance? @relation(fields: [insuranceId], references: [id], onDelete: SetNull)
+
+  serviceCodeId String
+  serviceCode   ServiceCode @relation(fields: [serviceCodeId], references: [id])
+
+  // Authorization Details
+  authNumber String? // Payer's authorization number
+
+  // Unit Tracking (CRITICAL for billing - prevents overbooking)
+  totalUnits     Int // Total authorized units
+  usedUnits      Int @default(0) // Units already billed
+  scheduledUnits Int @default(0) // Units scheduled but not completed
+
+  // Date Range
+  startDate DateTime
+  endDate   DateTime
+
+  // Status
+  status AuthStatus @default(ACTIVE)
+
+  // Notes
+  notes String?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  appointments   Appointment[]
+  sessions       Session[]
+  treatmentPlans TreatmentPlan[]
+
+  @@index([patientId])
+  @@index([organizationId])
+  @@index([status, endDate])
+  @@map("authorizations")
+}
+
+enum AuthStatus {
+  PENDING
+  ACTIVE
+  EXPIRED
+  EXHAUSTED
+  CANCELLED
+}
+
+// ============================================================================
+// SERVICE CODES (ABA CPT Codes)
+// ============================================================================
+
+model ServiceCode {
+  id             String        @id @default(uuid())
+  organizationId String? // null = system-wide default codes
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+
+  // CPT Code Information
+  code        String // e.g., "97153", "97155"
+  description String // e.g., "Adaptive behavior treatment by protocol"
+  category    ServiceCategory
+
+  // Requirements
+  requiredCredentials String[] // e.g., ["RBT", "BCBA"]
+  typicalDuration     Int? // in minutes, e.g., 60
+
+  // Billing
+  isActive Boolean @default(true)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Billing Link
+  defaultBillingCodeId String?
+  defaultBillingCode   BillingCode? @relation(fields: [defaultBillingCodeId], references: [id])
+
+  // Relations
+  authorizations Authorization[]
+  appointments   Appointment[]
+  sessions       Session[]
+
+  @@unique([organizationId, code])
+  @@index([code])
+  @@map("service_codes")
+}
+
+enum ServiceCategory {
+  ASSESSMENT // 97151
+  TREATMENT // 97153, 97155
+  SUPERVISION // 97155
+  FAMILY_GUIDANCE // 97156
+}
+
+// ============================================================================
+// BILLING CODES
+// ============================================================================
+
+model BillingCode {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // Code Information
+  code               String // e.g., "97153", "97155"
+  description        String // Official description
+  rate               Decimal    @db.Decimal(10, 2) // Standard rate
+  category           String? // e.g., "CPT", "HCPCS"
+  requiresModifier   Boolean    @default(false)
+  isActive           Boolean    @default(true)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations - billing codes can be default for multiple service codes
+  defaultForServiceCodes ServiceCode[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId, isActive])
+  @@map("billing_codes")
+}
+
+// ============================================================================
+// SCHEDULING
+// ============================================================================
+
+model Appointment {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  patientId String
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  practitionerId String
+  practitioner   Practitioner @relation(fields: [practitionerId], references: [id])
+
+  serviceCodeId String
+  serviceCode   ServiceCode @relation(fields: [serviceCodeId], references: [id])
+
+  authorizationId String?
+  authorization   Authorization? @relation(fields: [authorizationId], references: [id], onDelete: SetNull)
+
+  // Scheduling
+  startTime DateTime
+  endTime   DateTime
+
+  // Status
+  status AppointmentStatus @default(SCHEDULED)
+
+  // Recurrence
+  recurrenceRule String? // RRule format for recurring appointments
+
+  // Notes
+  notes String?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  session Session?
+
+  @@index([organizationId])
+  @@index([patientId])
+  @@index([practitionerId])
+  @@index([startTime, endTime])
+  @@map("appointments")
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+// ============================================================================
+// CLINICAL SESSIONS & DATA CAPTURE
+// ============================================================================
+
+model Session {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  appointmentId String      @unique
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  patientId String
+  patient   Patient @relation(fields: [patientId], references: [id])
+
+  practitionerId String
+  practitioner   Practitioner @relation(fields: [practitionerId], references: [id])
+
+  serviceCodeId String
+  serviceCode   ServiceCode @relation(fields: [serviceCodeId], references: [id])
+
+  authorizationId String?
+  authorization   Authorization? @relation(fields: [authorizationId], references: [id])
+
+  // Session Timing
+  startTime DateTime
+  endTime   DateTime?
+
+  // Billing
+  unitsUsed Int @default(0)
+
+  // Clinical Data
+  latestMetrics Json? // Real-time aggregated metrics
+  narrative     String? // Clinician's narrative
+
+  // AI-Generated Documentation
+  aiNoteJson      Json? // SOAP note structure
+  aiNoteGenerated Boolean @default(false)
+  aiNoteEditedBy  String? // userId who edited AI note
+
+  // Voice Note
+  voiceNoteUrl    String?
+  voiceTranscript String?
+
+  // Status
+  status SessionStatus @default(IN_PROGRESS)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  events        SessionEvent[]
+  progressNote  ProgressNote?
+  dataPoints    DataPoint[]
+  claimLineItem ClaimLineItem?
+
+  @@index([organizationId])
+  @@index([patientId])
+  @@index([practitionerId])
+  @@index([startTime])
+  @@map("sessions")
+}
+
+enum SessionStatus {
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum ClaimStatus {
+  DRAFT
+  READY_TO_SUBMIT
+  SUBMITTED
+  PAID
+  REJECTED
+  DENIED
+}
+
+model SessionEvent {
+  id        String  @id @default(uuid())
+  sessionId String
+  session   Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  // Event Type (e.g., "TANTRUM_START", "MAND_CORRECT", "DURATION_ADD")
+  eventType String
+
+  // Event Data
+  rawValue Int? // Optional numeric value
+  metadata Json? // Additional event-specific data
+
+  // Timestamp
+  timestamp DateTime @default(now())
+
+  @@index([sessionId])
+  @@index([timestamp])
+  @@map("session_events")
+}
+
+// ============================================================================
+// COMPLIANCE & AUDIT
+// ============================================================================
+
+model AuditLog {
+  id String @id @default(uuid())
+
+  // Multi-tenancy
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // Audit Information
+  action     String // CREATE, READ, UPDATE, DELETE
+  resource   String // patients, practitioners, users, etc.
+  resourceId String? // ID of the resource being accessed
+  details    Json? // Additional context (field changes, search params, etc.)
+  ipAddress  String? // Client IP address
+
+  // Timestamp
+  timestamp DateTime @default(now())
+
+  @@index([userId])
+  @@index([organizationId])
   @@index([timestamp])
   @@index([resource, resourceId])
   @@map("audit_logs")
 }
 
+// ============================================================================
+// BREAK-THE-GLASS EMERGENCY ACCESS
+// ============================================================================
+
 // BtgAccessGrant model - Break-the-Glass Emergency Access
 // HIPAA § 164.308(a)(4)(ii)(C) - Emergency Access Procedure
 // Provides time-bound, audited emergency access to patient records
 model BtgAccessGrant {
-  id                String    @id @default(uuid())
+  id String @id @default(uuid())
 
   // Who granted the access (must be ADMIN)
-  grantedByUserId   String
-  grantedByUser     User      @relation("BtgGrantedBy", fields: [grantedByUserId], references: [id], onDelete: Cascade)
+  grantedByUserId String
+  grantedByUser   User   @relation("BtgGrantedBy", fields: [grantedByUserId], references: [id], onDelete: Cascade)
 
   // Who receives the emergency access (typically ADMIN for technical investigations)
-  grantedToUserId   String
-  grantedToUser     User      @relation("BtgGrantedTo", fields: [grantedToUserId], references: [id], onDelete: Cascade)
+  grantedToUserId String
+  grantedToUser   User   @relation("BtgGrantedTo", fields: [grantedToUserId], references: [id], onDelete: Cascade)
 
   // Which patient record is being accessed
-  patientId         String
-  patient           Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId String
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
 
   // Emergency access details
-  justification     String    // Mandatory: Why is emergency access needed?
-  durationMinutes   Int       // How long is access granted (e.g., 60, 120, 240)
-  expiresAt         DateTime  // Calculated: createdAt + durationMinutes
+  justification   String // Mandatory: Why is emergency access needed?
+  durationMinutes Int // How long is access granted (e.g., 60, 120, 240)
+  expiresAt       DateTime // Calculated: createdAt + durationMinutes
 
   // Revocation (if access is manually revoked before expiration)
-  revokedAt         DateTime?
-  revokedByUserId   String?
-  revokedByUser     User?     @relation("BtgRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
-  revokedReason     String?
+  revokedAt       DateTime?
+  revokedByUserId String?
+  revokedByUser   User?     @relation("BtgRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+  revokedReason   String?
 
   // Audit trail
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Indexes for efficient queries
   @@index([grantedToUserId, patientId, expiresAt]) // Check active grants for user accessing patient
-  @@index([patientId])                              // All grants for a patient
-  @@index([grantedByUserId])                        // All grants created by an admin
-  @@index([expiresAt])                              // Cleanup expired grants
-  @@index([createdAt])                              // Audit timeline
-
+  @@index([patientId]) // All grants for a patient
+  @@index([grantedByUserId]) // All grants created by an admin
+  @@index([expiresAt]) // Cleanup expired grants
+  @@index([createdAt]) // Audit timeline
   @@map("btg_access_grants")
 }
 
-// Update Patient model to include BTG relation
-model Patient {
-  id                  String             @id @default(uuid())
-  userId              String             @unique
-  user                User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+// ============================================================================
+// TREATMENT PLANS & CLINICAL OUTCOMES TRACKING
+// ============================================================================
 
-  // Personal Information
-  firstName           String
-  lastName            String
-  dateOfBirth         DateTime
+model TreatmentPlan {
+  id             String              @id @default(uuid())
+  organizationId String
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  // Medical Information
-  medicalRecordNumber String             @unique
-  phoneNumber         String?
-  address             String?
+  patientId String
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  authorizationId String?
+  authorization   Authorization? @relation(fields: [authorizationId], references: [id], onDelete: SetNull)
+
+  createdByUserId String
+  createdBy       User   @relation("TreatmentPlanCreator", fields: [createdByUserId], references: [id], onDelete: Cascade)
+
+  // Plan Details
+  title       String
+  description String @db.Text
+
+  // Date Management
+  startDate  DateTime
+  endDate    DateTime?
+  reviewDate DateTime // Next scheduled review date
+
+  // Status
+  status TreatmentPlanStatus @default(DRAFT)
 
   // Timestamps
-  createdAt           DateTime           @default(now())
-  updatedAt           DateTime           @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
-  btgAccessGrants     BtgAccessGrant[]
+  goals         Goal[]
+  progressNotes ProgressNote[]
 
-  @@index([userId])
-  @@index([medicalRecordNumber])
-  @@map("patients")
+  @@index([patientId, organizationId])
+  @@index([status, organizationId])
+  @@index([createdByUserId])
+  @@map("treatment_plans")
+}
+
+enum TreatmentPlanStatus {
+  DRAFT
+  ACTIVE
+  UNDER_REVIEW
+  COMPLETED
+  DISCONTINUED
+}
+
+model Goal {
+  id              String        @id @default(uuid())
+  treatmentPlanId String
+  treatmentPlan   TreatmentPlan @relation(fields: [treatmentPlanId], references: [id], onDelete: Cascade)
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // Goal Details
+  title       String
+  description String   @db.Text
+  goalType    GoalType
+  domain      String // e.g., "Communication", "Social Skills", "Self-Care"
+
+  // Measurement
+  baseline          Json? // Flexible structure for baseline data
+  targetCriteria    String @db.Text // e.g., "80% accuracy over 3 consecutive sessions"
+  measurementMethod String // e.g., "Frequency count", "Duration", "Task analysis"
+
+  // Status
+  status      GoalStatus @default(ACTIVE)
+  masteryDate DateTime? // When goal was achieved
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  dataPoints DataPoint[]
+
+  @@index([treatmentPlanId, organizationId])
+  @@index([status])
+  @@index([organizationId, status]) // Analytics: Filter goals by org and status
+  @@map("goals")
+}
+
+enum GoalType {
+  SHORT_TERM
+  LONG_TERM
+}
+
+enum GoalStatus {
+  ACTIVE
+  MET
+  MODIFIED
+  DISCONTINUED
+}
+
+model ProgressNote {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  sessionId String  @unique
+  session   Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  treatmentPlanId String?
+  treatmentPlan   TreatmentPlan? @relation(fields: [treatmentPlanId], references: [id], onDelete: SetNull)
+
+  createdByUserId String
+  createdBy       User   @relation(fields: [createdByUserId], references: [id], onDelete: Cascade)
+
+  // Clinical Narrative
+  narrative              String  @db.Text
+  behaviorObservations   String? @db.Text
+  interventionsUsed      String? @db.Text
+  recommendedAdjustments String? @db.Text
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  dataPoints DataPoint[]
+
+  @@index([sessionId, organizationId])
+  @@index([treatmentPlanId])
+  @@index([createdByUserId])
+  @@map("progress_notes")
+}
+
+model DataPoint {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  goalId String
+  goal   Goal   @relation(fields: [goalId], references: [id], onDelete: Cascade)
+
+  progressNoteId String?
+  progressNote   ProgressNote? @relation(fields: [progressNoteId], references: [id], onDelete: SetNull)
+
+  sessionId String?
+  session   Session? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  // Data Collection
+  date  DateTime @default(now())
+  value Float
+  unit  String // e.g., "count", "seconds", "percentage", "trials"
+  notes String? @db.Text
+
+  // Timestamps (immutable after creation)
+  createdAt DateTime @default(now())
+
+  @@index([goalId, date])
+  @@index([sessionId, organizationId])
+  @@index([progressNoteId])
+  @@index([organizationId, date]) // Analytics: Organization-wide date filtering
+  @@map("data_points")
+}
+
+// ============================================================================
+// REVENUE CYCLE MANAGEMENT (RCM)
+// ============================================================================
+
+model Claim {
+  id                 String      @id @default(uuid())
+  organizationId     String
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  patientId          String
+  patient            Patient     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  status             ClaimStatus @default(DRAFT)
+  totalBilledAmount  Decimal     @db.Decimal(10, 2)
+  dateOfServiceStart DateTime
+  dateOfServiceEnd   DateTime
+  submittedAt        DateTime?
+
+  // Snapshot of patient's insurance at time of claim creation
+  payerDetails       Json
+
+  // Human-readable, org-specific identifier
+  claimNumber        String      @unique
+
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  lineItems          ClaimLineItem[]
+  submissions        ClaimSubmission[] @relation("ClaimToSubmission")
+
+  @@index([organizationId, status])
+  @@index([patientId])
+  @@index([dateOfServiceStart])
+  @@map("claims")
+}
+
+model ClaimLineItem {
+  id             String   @id @default(uuid())
+  claimId        String
+  claim          Claim    @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  sessionId      String   @unique // CRITICAL: Ensures a session can only be on ONE claim
+  session        Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  serviceCode    String
+  modifiers      String[]
+  units          Decimal  @db.Decimal(10, 2)
+  billedAmount   Decimal  @db.Decimal(10, 2)
+  dateOfService  DateTime
+
+  @@index([claimId])
+  @@index([sessionId])
+  @@map("claim_line_items")
+}
+
+model ClaimSubmission {
+  id             String   @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // Submission metadata
+  status         String   @default("SENT") // SENT, ACKNOWLEDGED, REJECTED, PROCESSING
+  submissionId   String?  // ID from clearinghouse/Stedi
+  submittedAt    DateTime @default(now())
+
+  // Store the JSON payload sent to Stedi (for audit and resubmission)
+  rawInputJson   Json
+
+  // Relations
+  claimIds       String[] // Array of claim IDs in this batch
+  claims         Claim[]  @relation("ClaimToSubmission")
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([status])
+  @@map("claim_submissions")
 }
