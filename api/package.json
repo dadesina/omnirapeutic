@@ -9,7 +9,15 @@
     "start": "node dist/index.js",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "lint": "eslint . --ext .ts",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "load-test:setup": "createdb omnirapeutic_load_test && DATABASE_URL=postgresql://postgres:postgres@localhost:5432/omnirapeutic_load_test npx prisma migrate deploy && npm run load-test:seed",
+    "load-test:seed": "ts-node infrastructure/load-tests/seed-test-data.ts",
+    "load-test:scenario1": "artillery run infrastructure/load-tests/scenarios/high-contention.yml --output infrastructure/load-tests/report-contention.json",
+    "load-test:scenario2": "artillery run infrastructure/load-tests/scenarios/high-throughput.yml --output infrastructure/load-tests/report-throughput.json",
+    "load-test:scenario3": "artillery run infrastructure/load-tests/scenarios/mixed-operations.yml --output infrastructure/load-tests/report-mixed.json",
+    "load-test:report": "artillery report infrastructure/load-tests/report-contention.json && artillery report infrastructure/load-tests/report-throughput.json && artillery report infrastructure/load-tests/report-mixed.json",
+    "load-test:verify": "PGPASSWORD=postgres psql postgresql://postgres:postgres@localhost:5432/omnirapeutic_load_test -f infrastructure/load-tests/verify-integrity.sql",
+    "load-test:all": "npm run load-test:setup && npm run load-test:scenario1 && npm run load-test:scenario2 && npm run load-test:scenario3 && npm run load-test:report && npm run load-test:verify"
   },
   "keywords": [],
   "author": "",
@@ -24,6 +32,8 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.16.3",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1",
     "zod": "^4.1.13"
   },
   "devDependencies": {
@@ -35,8 +45,11 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.10.1",
     "@types/supertest": "^6.0.3",
+    "@types/swagger-jsdoc": "^6.0.4",
+    "@types/swagger-ui-express": "^4.1.8",
     "@typescript-eslint/eslint-plugin": "^8.48.0",
     "@typescript-eslint/parser": "^8.48.0",
+    "artillery": "^2.0.27",
     "eslint": "^9.39.1",
     "jest": "^30.2.0",
     "prettier": "^3.6.2",
