@@ -14,12 +14,15 @@ import {
   deletePractitioner
 } from '../services/practitioner.service';
 import { authenticateToken, requireRole } from '../middleware/auth.middleware';
+import { organizationScope } from '../middleware/organization-scope.middleware';
+import { logAuditEvent } from '../services/audit.service';
 import prisma from '../config/database';
 
 const router = Router();
 
-// All routes require authentication
+// All routes require authentication and organization scoping
 router.use(authenticateToken);
+router.use(organizationScope);
 
 /**
  * POST /api/practitioners
@@ -30,7 +33,7 @@ router.post(
   requireRole([Role.ADMIN]),
   async (req: Request, res: Response) => {
     try {
-      const { userId, firstName, lastName, licenseNumber, specialization, phoneNumber } = req.body;
+      const { userId, firstName, lastName, licenseNumber, specialization, phoneNumber, credentials } = req.body;
 
       // Validate required fields
       if (!userId || !firstName || !lastName || !licenseNumber || !specialization) {
@@ -41,29 +44,44 @@ router.post(
         return;
       }
 
+      // Extract organizationId: Super Admins must provide it, regular admins use their own
+      const organizationId = req.user!.isSuperAdmin
+        ? req.body.organizationId
+        : req.user!.organizationId;
+
+      // Validate Super Admin provides explicit organizationId
+      if (req.user!.isSuperAdmin && !req.body.organizationId) {
+        res.status(400).json({
+          error: 'Bad Request',
+          message: 'Super Admins must provide organizationId in request body'
+        });
+        return;
+      }
+
       // Create practitioner
       const practitioner = await createPractitioner(
         {
           userId,
+          organizationId,
           firstName,
           lastName,
           licenseNumber,
           specialization,
-          phoneNumber
+          phoneNumber,
+          credentials
         },
         req.user!
       );
 
-      // Audit log
-      await prisma.auditLog.create({
-        data: {
-          userId: req.user!.userId,
-          action: 'CREATE',
-          resource: 'practitioners',
-          resourceId: practitioner.id,
-          details: { practitionerId: practitioner.id, licenseNumber: practitioner.licenseNumber },
-          ipAddress: req.ip || '127.0.0.1'
-        }
+      // Audit log with organization context
+      await logAuditEvent({
+        userId: req.user!.userId,
+        organizationId: practitioner.organizationId,
+        action: 'CREATE',
+        resource: 'practitioners',
+        resourceId: practitioner.id,
+        details: { practitionerId: practitioner.id, licenseNumber: practitioner.licenseNumber },
+        ipAddress: req.ip || '127.0.0.1'
       });
 
       res.status(201).json({ practitioner });
@@ -78,7 +96,7 @@ router.post(
       if (message.includes('already exists') || message.includes('Unique constraint')) {
         res.status(409).json({
           error: 'Conflict',
-          message: 'License number already exists'
+          message: 'License number already exists in this organization'
         });
         return;
       }
@@ -108,15 +126,15 @@ router.get(
 
       const result = await getAllPractitioners(req.user!, { page, limit, search, specialization });
 
-      // Audit log
-      await prisma.auditLog.create({
-        data: {
-          userId: req.user!.userId,
-          action: 'READ',
-          resource: 'practitioners',
-          details: { action: 'list', page, limit, count: result.practitioners.length },
-          ipAddress: req.ip || '127.0.0.1'
-        }
+      // Audit log with organization context
+      await logAuditEvent({
+        userId: req.user!.userId,
+        organizationId: req.user!.organizationId,
+        action: 'READ',
+        resource: 'practitioners',
+        resourceId: null,
+        details: { action: 'list', page, limit, count: result.practitioners.length },
+        ipAddress: req.ip || '127.0.0.1'
       });
 
       res.status(200).json(result);
@@ -147,16 +165,15 @@ router.get('/:id', async (req: Request, res: Response) => {
 
     const practitioner = await getPractitionerById(id, req.user!);
 
-    // Audit log
-    await prisma.auditLog.create({
-      data: {
-        userId: req.user!.userId,
-        action: 'READ',
-        resource: 'practitioners',
-        resourceId: id,
-        details: { practitionerId: id, licenseNumber: practitioner.licenseNumber },
-        ipAddress: req.ip || '127.0.0.1'
-      }
+    // Audit log with organization context
+    await logAuditEvent({
+      userId: req.user!.userId,
+      organizationId: practitioner.organizationId,
+      action: 'READ',
+      resource: 'practitioners',
+      resourceId: id,
+      details: { practitionerId: id, licenseNumber: practitioner.licenseNumber },
+      ipAddress: req.ip || '127.0.0.1'
     });
 
     res.status(200).json({ practitioner });
@@ -191,19 +208,18 @@ router.put('/:id', async (req: Request, res: Response) => {
       req.user!
     );
 
-    // Audit log
-    await prisma.auditLog.create({
-      data: {
-        userId: req.user!.userId,
-        action: 'UPDATE',
-        resource: 'practitioners',
-        resourceId: id,
-        details: {
-          practitionerId: id,
-          changes: { firstName, lastName, specialization, phoneNumber }
-        },
-        ipAddress: req.ip || '127.0.0.1'
-      }
+    // Audit log with organization context
+    await logAuditEvent({
+      userId: req.user!.userId,
+      organizationId: practitioner.organizationId,
+      action: 'UPDATE',
+      resource: 'practitioners',
+      resourceId: id,
+      details: {
+        practitionerId: id,
+        changes: { firstName, lastName, specialization, phoneNumber }
+      },
+      ipAddress: req.ip || '127.0.0.1'
     });
 
     res.status(200).json({ practitioner });
@@ -239,18 +255,20 @@ router.delete(
     try {
       const { id } = req.params;
 
+      // Get practitioner first to capture organizationId before deletion
+      const practitioner = await getPractitionerById(id, req.user!);
+
       await deletePractitioner(id, req.user!);
 
-      // Audit log
-      await prisma.auditLog.create({
-        data: {
-          userId: req.user!.userId,
-          action: 'DELETE',
-          resource: 'practitioners',
-          resourceId: id,
-          details: { practitionerId: id },
-          ipAddress: req.ip || '127.0.0.1'
-        }
+      // Audit log with organization context
+      await logAuditEvent({
+        userId: req.user!.userId,
+        organizationId: practitioner.organizationId,
+        action: 'DELETE',
+        resource: 'practitioners',
+        resourceId: id,
+        details: { practitionerId: id },
+        ipAddress: req.ip || '127.0.0.1'
       });
 
       res.status(204).send();

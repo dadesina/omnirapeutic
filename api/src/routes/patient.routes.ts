@@ -15,14 +15,16 @@ import {
   deletePatient
 } from '../services/patient.service';
 import { authenticateToken, requireRole } from '../middleware/auth.middleware';
+import { organizationScope } from '../middleware/organization-scope.middleware';
 import prisma from '../config/database';
 import { hasActiveBtgAccess } from '../services/btg.service';
 import { logAuditEvent } from '../services/audit.service';
 
 const router = Router();
 
-// All routes require authentication
+// All routes require authentication and organization scoping
 router.use(authenticateToken);
+router.use(organizationScope);
 
 /**
  * POST /api/patients
@@ -44,10 +46,25 @@ router.post(
         return;
       }
 
+      // Extract organizationId: Super Admins must provide it, regular admins use their own
+      const organizationId = req.user!.isSuperAdmin
+        ? req.body.organizationId
+        : req.user!.organizationId;
+
+      // Validate Super Admin provides explicit organizationId
+      if (req.user!.isSuperAdmin && !req.body.organizationId) {
+        res.status(400).json({
+          error: 'Bad Request',
+          message: 'Super Admins must provide organizationId in request body'
+        });
+        return;
+      }
+
       // Create patient
       const patient = await createPatient(
         {
           userId,
+          organizationId,
           firstName,
           lastName,
           dateOfBirth,
@@ -58,9 +75,10 @@ router.post(
         req.user!
       );
 
-      // Audit log
+      // Audit log with organization context
       await logAuditEvent({
         userId: req.user!.userId,
+        organizationId: patient.organizationId,
         action: 'CREATE',
         resource: 'patients',
         resourceId: patient.id,
@@ -80,7 +98,7 @@ router.post(
       if (message.includes('already exists') || message.includes('Unique constraint')) {
         res.status(409).json({
           error: 'Conflict',
-          message: 'Medical record number already exists'
+          message: 'Medical record number already exists in this organization'
         });
         return;
       }
@@ -114,9 +132,10 @@ router.get(
 
       const result = await getAllPatients(req.user!, { page, limit, search });
 
-      // Audit log - PHI access
+      // Audit log - PHI access with organization context
       await logAuditEvent({
         userId: req.user!.userId,
+        organizationId: req.user!.organizationId,
         action: 'READ',
         resource: 'patients',
         resourceId: null,
@@ -155,9 +174,10 @@ router.get('/:id', async (req: Request, res: Response) => {
     // Check if access was granted via BTG
     const usedBtgAccess = await hasActiveBtgAccess(req.user!.userId, id);
 
-    // Audit log - PHI access
+    // Audit log - PHI access with organization context
     await logAuditEvent({
       userId: req.user!.userId,
+      organizationId: patient.organizationId,
       action: usedBtgAccess ? 'BTG_USE_ACCESS' : 'READ',
       resource: 'patients',
       resourceId: id,
@@ -209,9 +229,10 @@ router.put(
         req.user!
       );
 
-      // Audit log - PHI modification
+      // Audit log - PHI modification with organization context
       await logAuditEvent({
         userId: req.user!.userId,
+        organizationId: patient.organizationId,
         action: 'UPDATE',
         resource: 'patients',
         resourceId: id,
@@ -261,11 +282,15 @@ router.delete(
     try {
       const { id } = req.params;
 
+      // Get patient first to capture organizationId before deletion
+      const patient = await getPatientById(id, req.user!);
+
       await deletePatient(id, req.user!);
 
-      // Audit log - PHI deletion
+      // Audit log - PHI deletion with organization context
       await logAuditEvent({
         userId: req.user!.userId,
+        organizationId: patient.organizationId,
         action: 'DELETE',
         resource: 'patients',
         resourceId: id,
