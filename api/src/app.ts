@@ -25,6 +25,14 @@ import dataPointRouter from './routes/dataPoint.routes';
 import analyticsRouter from './routes/analytics.routes';
 import billingCodeRouter from './routes/billing-code.routes';
 import claimRouter from './routes/claim.routes';
+import caseloadRouter from './routes/caseload.routes';
+import caregiverRouter from './routes/caregiver.routes';
+import messageRouter from './routes/message.routes';
+import publicationRouter from './routes/publication.routes';
+import supervisionRouter from './routes/supervision.routes';
+import sessionEventRouter from './routes/session-event.routes';
+import sessionTemplateRouter from './routes/session-template.routes';
+import goalProgressRouter from './routes/goal-progress.routes';
 
 export function createApp(): Application {
   const app: Application = express();
@@ -92,12 +100,22 @@ export function createApp(): Application {
   app.use('/api/claims', claimRouter);
   app.use('/api/appointments', appointmentRouter);
   app.use('/api/sessions', sessionRouter);
+  app.use('/api/sessions', sessionEventRouter); // Session events (nested under sessions)
+  app.use('/api', sessionTemplateRouter); // Session templates and documentation (Phase 7B.2)
+  // ABA-specific and other specific routes should come before generic /api routes
+  app.use('/api/caseload', caseloadRouter); // Caseload management (ABA therapy)
+  app.use('/api/caregivers', caregiverRouter); // Caregiver management (ABA therapy)
+  app.use('/api/messages', messageRouter); // Secure messaging (ABA therapy)
+  app.use('/api/publications', publicationRouter); // Publication system (ABA therapy)
+  app.use('/api/supervision', supervisionRouter); // Supervision management (ABA therapy)
+  app.use('/api/admin/btg', btgRouter); // Break-the-Glass emergency access (ADMIN only)
+  // Generic /api routes last
   app.use('/api', treatmentPlanRouter);
   app.use('/api', goalRouter);
+  app.use('/api/goals', goalProgressRouter); // Goal progress & milestones (Phase 7B.2)
   app.use('/api', progressNoteRouter);
   app.use('/api', dataPointRouter);
   app.use('/api', analyticsRouter);
-  app.use('/api/admin/btg', btgRouter); // Break-the-Glass emergency access (ADMIN only)
 
   // 404 handler for undefined routes
   app.use((req: Request, res: Response) => {
