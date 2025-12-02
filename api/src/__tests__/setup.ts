@@ -63,6 +63,10 @@ afterEach(async () => {
   // Clinical data (must be deleted before sessions and treatment plans)
   await prisma.dataPoint.deleteMany({}); // Must delete before goals and progress notes
   await prisma.progressNote.deleteMany({}); // Must delete before sessions and treatment plans
+
+  // Phase 7B.2: Session documentation (must delete before sessions and templates)
+  await prisma.sessionDocumentation.deleteMany({}); // Must delete before sessions and templates
+
   await prisma.sessionEvent.deleteMany({}); // Must delete before sessions
   await prisma.session.deleteMany({}); // Must delete before appointments
 
@@ -80,7 +84,20 @@ afterEach(async () => {
   await prisma.patientInsurance.deleteMany({}); // Must delete before patients
   await prisma.patient.deleteMany({});
   await prisma.practitioner.deleteMany({});
+
+  // ABA therapy relationships (must delete before users)
+  await prisma.supervision.deleteMany({}); // Must delete before users
+  await prisma.caregiversClient.deleteMany({}); // Must delete before users
+  await prisma.messageParticipant.deleteMany({}); // Must delete before messages
+  await prisma.message.deleteMany({}); // Must delete before users
+  await prisma.publicationRecipient.deleteMany({}); // Must delete before publications
+  await prisma.publication.deleteMany({}); // Must delete before users
+
   await prisma.user.deleteMany({});
+
+  // Phase 7B.2: Session templates (must delete after sessions but before organizations)
+  await prisma.sessionTemplate.deleteMany({}); // Must delete before organizations
+
   await prisma.organization.deleteMany({}); // Must be last due to foreign keys
 });
 

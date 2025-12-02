@@ -98,8 +98,12 @@ router.post(
         ipAddress
       );
 
-      // TODO: Trigger CloudWatch alarm for BTG grant
-      // This will be implemented in the alerting task
+      // CloudWatch alarm configured via infrastructure (Terraform)
+      // Metric filter monitors console.log output for BTG_GRANT_ACCESS action
+      // See: infrastructure/terraform/modules/alarms/main.tf (lines 595-643)
+      // - BTG_GRANT_ACCESS triggers CRITICAL alarm (immediate notification)
+      // - BTG_USE_ACCESS triggers HIGH alarm (when grant is actively used)
+      // Alarm details: SNS topic sends notifications to security team
 
       res.status(201).json(grant);
     } catch (error: any) {
